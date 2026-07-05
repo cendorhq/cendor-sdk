@@ -39,19 +39,29 @@ _active_decision: ContextVar[Any] = ContextVar("cendor_sdk_active_decision", def
 
 
 @contextmanager
-def _collector(run_id: str) -> Any:
-    """Subscribe a bus collector for this run; yields the (ordered) list of its LLM/tool events."""
+def _collector(run_id: str, *, agent_name: str = "", on_step: Any = None) -> Any:
+    """Subscribe a bus collector for this run; yields the (ordered) list of its LLM/tool events.
+
+    If ``on_step`` is set, it is called with each event's :class:`Step` **live**, as the event is
+    emitted on the bus (after each model turn / tool call completes) — the public progress hook.
+    A raised callback is swallowed: a bad progress hook must never break a run.
+    """
     events: list[LLMCall | ToolCall] = []
 
-    def on_event(ev: Any) -> None:
+    def on_bus(ev: Any) -> None:
         if isinstance(ev, (LLMCall, ToolCall)) and getattr(ev, "trace_id", "") == run_id:
             events.append(ev)
+            if on_step is not None:
+                try:
+                    on_step(_step(agent_name, ev))
+                except Exception:  # noqa: BLE001 - a progress hook must never break a run
+                    pass
 
-    bus.subscribe(on_event)
+    bus.subscribe(on_bus)
     try:
         yield events
     finally:
-        bus.unsubscribe(on_event)
+        bus.unsubscribe(on_bus)
 
 
 @contextmanager
@@ -257,12 +267,14 @@ def run_agent_sync(
     handoff_targets: dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     on_turn: Any = None,
+    on_step: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
     """Run one agent's turns over ``messages`` (mutated in place).
 
     Returns ``(output, steps, switched)`` — ``switched`` is a handoff target name if the agent
     transferred control, else ``None``. ``retry`` retries transient model calls; ``on_turn`` (if
-    set) is called with ``messages`` after each turn — the checkpoint hook.
+    set) is called with ``messages`` after each turn — the checkpoint hook; ``on_step`` (if set) is
+    called with each :class:`Step` live as it completes — the progress hook.
     """
     provider = agent.provider_impl
     create = provider.create_method(_client_for(agent, async_=False))
@@ -274,7 +286,11 @@ def run_agent_sync(
     output: Any = None
     switched: str | None = None
 
-    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+    with (
+        _collector(run_id, agent_name=agent.name, on_step=on_step) as events,
+        trace(run_id),
+        _decision(audit, agent, messages, run_id),
+    ):
         for _turn in range(turns):
             wire = _assemble(agent, messages)
             kwargs = provider.build_kwargs(
@@ -322,6 +338,7 @@ async def run_agent_async(
     handoff_targets: dict[str, str] | None = None,
     retry: RetryPolicy | None = None,
     on_turn: Any = None,
+    on_step: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
     """Async counterpart of :func:`run_agent_sync`."""
     provider = agent.provider_impl
@@ -334,7 +351,11 @@ async def run_agent_async(
     output: Any = None
     switched: str | None = None
 
-    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+    with (
+        _collector(run_id, agent_name=agent.name, on_step=on_step) as events,
+        trace(run_id),
+        _decision(audit, agent, messages, run_id),
+    ):
         for _turn in range(turns):
             wire = _assemble(agent, messages)
             kwargs = provider.build_kwargs(
@@ -412,6 +433,7 @@ class Runner:
         max_turns: int | None = None,
         retry: RetryPolicy | None = None,
         checkpoint: Any = None,
+        on_step: Any = None,
     ) -> None:
         from .checkpoint import _as_checkpointer
 
@@ -421,6 +443,7 @@ class Runner:
         self.max_turns = max_turns or agent.max_turns
         self.retry = retry
         self.checkpoint = _as_checkpointer(checkpoint)
+        self.on_step = on_step
 
     def _start(self, input: Any) -> tuple[list[dict], str, Any]:
         """Resolve starting messages (resuming from a checkpoint if one is unfinished)."""
@@ -463,6 +486,7 @@ class Runner:
             max_turns=self.max_turns,
             retry=self.retry,
             on_turn=on_turn,
+            on_step=self.on_step,
         )
         return self._finish(run_id, output, steps, messages)
 
@@ -476,6 +500,7 @@ class Runner:
             max_turns=self.max_turns,
             retry=self.retry,
             on_turn=on_turn,
+            on_step=self.on_step,
         )
         return self._finish(run_id, output, steps, messages)
 
@@ -650,7 +675,10 @@ class _Run:
         max_turns: int | None = None,
         retry: RetryPolicy | None = None,
         checkpoint: Any = None,
+        on_step: Any = None,
     ) -> Result:
+        """``on_step`` (if set) is called with each :class:`~cendor.sdk.result.Step` live as the
+        run progresses — a public progress hook, complementing the post-hoc ``Result.steps``."""
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents
 
@@ -661,6 +689,7 @@ class _Run:
                 max_turns=max_turns,
                 session=session,
                 checkpoint=checkpoint,
+                on_step=on_step,
             )
         return Runner(
             agent,
@@ -669,6 +698,7 @@ class _Run:
             max_turns=max_turns,
             retry=retry,
             checkpoint=checkpoint,
+            on_step=on_step,
         ).run(input)
 
     async def aio(
@@ -681,7 +711,9 @@ class _Run:
         max_turns: int | None = None,
         retry: RetryPolicy | None = None,
         checkpoint: Any = None,
+        on_step: Any = None,
     ) -> Result:
+        """Async counterpart of :meth:`__call__`; ``on_step`` fires per :class:`Step` live."""
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents_async
 
@@ -692,6 +724,7 @@ class _Run:
                 max_turns=max_turns,
                 session=session,
                 checkpoint=checkpoint,
+                on_step=on_step,
             )
         return await Runner(
             agent,
@@ -700,6 +733,7 @@ class _Run:
             max_turns=max_turns,
             retry=retry,
             checkpoint=checkpoint,
+            on_step=on_step,
         ).run_async(input)
 
     def stream(
