@@ -55,7 +55,7 @@ from .orchestration import (
     sequential,
     supervisor,
 )
-from .otel import span_tree
+from .otel import live_spans, span_tree
 from .pricing import register_model_price
 from .providers import ParsedResponse, ToolInvocation
 from .rag import Hit, VectorIndex
@@ -110,6 +110,7 @@ __all__ = [
     "A2AClient",
     "FoundryAdapter",
     "span_tree",
+    "live_spans",
     "require_approval",
     # hardening + eval (Phase 4)
     "RetryPolicy",
