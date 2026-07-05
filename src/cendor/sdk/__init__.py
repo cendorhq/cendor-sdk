@@ -24,6 +24,8 @@ print(result.output, result.cost)
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 # --- audit + redaction (cendor-acttrace, re-exported) -------------------------------------------
 from cendor.acttrace import AuditLog, Policy, verify
 
@@ -71,7 +73,13 @@ from .result import Run as Run
 from .runner import Runner, run
 from .tools import Tool, tool
 
-__version__ = "1.0.0"
+# Derive the version from installed package metadata (the single source of truth is pyproject.toml),
+# so it can never drift from the published distribution. Falls back only in a source tree with no
+# installed metadata.
+try:
+    __version__ = version("cendor-sdk")
+except PackageNotFoundError:  # pragma: no cover - source tree without installed metadata
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     # agent + loop
