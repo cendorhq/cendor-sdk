@@ -4,6 +4,25 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-07-05
+
+### Added
+- **Live progress hook** — `run(agent, input, on_step=cb)` (and `run.aio`) calls `cb(step)` with each
+  `Step` **live** as the run advances, complementing the post-hoc `Result.steps`. Works for single-
+  and multi-agent runs (each `Step` carries its agent's name); a raised callback never breaks a run.
+- **Opt-in prompt caching** — `Agent(cache=True)` enables explicit provider prompt caching. For
+  Anthropic it puts a `cache_control` breakpoint on the system prompt + tool schema (the stable
+  prefix); cache-read/write tokens flow through `cendor-core`'s usage extraction + pricing, so
+  `Result.usage`/`cost` reflect the savings. A no-op for providers that cache automatically (OpenAI).
+- **Multi-agent streaming** — `run.stream([...])` / `run.astream([...])` now stream a handoff run
+  (previously raised `TypeError`): events from each active agent, switching on a `transfer_to_<peer>`
+  call, with one terminal `RunComplete` carrying the aggregate `Result`.
+- **Live OTel spans** — `cendor.sdk.otel.live_spans()` context manager emits `gen_ai` spans as a run
+  progresses (the streaming counterpart to the post-hoc `span_tree()`): a root `agent.run` span
+  brackets the block and a child `chat`/`execute_tool` span is emitted as each call completes (start
+  backdated by `latency_ms` for accurate duration). No-op without OpenTelemetry.
+- `__version__` is now derived from installed package metadata (single source of truth: `pyproject`).
+
 ## [1.0.1] — 2026-07-05
 
 ### Changed

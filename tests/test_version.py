@@ -1,7 +1,7 @@
 """`cendor.sdk.__version__` is derived from installed metadata and stays in sync with the manifest.
 
-Regression guard: `__version__` was once hardcoded and drifted from `pyproject.toml`. Deriving it from
-`importlib.metadata` makes pyproject the single source of truth.
+Regression guard: `__version__` was once hardcoded and drifted from `pyproject.toml`. Deriving
+it from `importlib.metadata` makes pyproject the single source of truth.
 """
 
 from __future__ import annotations
