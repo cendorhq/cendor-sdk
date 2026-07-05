@@ -36,7 +36,11 @@ from cendor.tokenguard import BudgetExceeded, budget, report, track
 from ._governance import guard
 
 # --- the SDK -----------------------------------------------------------------------------------
+from .a2a import A2AClient, A2AServer
 from .agent import Agent
+from .foundry import FoundryAdapter
+from .hitl import require_approval
+from .mcp import load_mcp_tools
 from .memory import Session
 from .orchestration import (
     Handoff,
@@ -46,12 +50,13 @@ from .orchestration import (
     sequential,
     supervisor,
 )
+from .otel import span_tree
 from .providers import ParsedResponse, ToolInvocation
 from .result import Result, Run, Step
 from .runner import Runner, run
 from .tools import Tool, tool
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     # agent + loop
@@ -68,6 +73,13 @@ __all__ = [
     "parallel",
     "parallel_async",
     "supervisor",
+    # interop (Phase 3)
+    "load_mcp_tools",
+    "A2AServer",
+    "A2AClient",
+    "FoundryAdapter",
+    "span_tree",
+    "require_approval",
     # result model
     "Result",
     "Run",

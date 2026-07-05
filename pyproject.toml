@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "0.2.0"
+version = "0.3.0"
 description = "A governed, provider-agnostic agent SDK — cost budgets, tamper-evident audit, PII redaction, context governance, and record/replay testing as the foundation, not plugins. The second door to the Cendor stack."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -82,6 +82,9 @@ dev = [
   "httpx>=0.27",
   "openai>=1.0",
   "anthropic>=0.30",
+  # Phase 3 interop tests: OTel span-tree assertions use the in-memory exporter.
+  "opentelemetry-api>=1.25",
+  "opentelemetry-sdk>=1.25",
 ]
 
 [tool.ruff]
