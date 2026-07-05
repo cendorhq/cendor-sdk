@@ -7,15 +7,18 @@ phases build on.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
+from pathlib import Path
 
 
 @dataclass
 class Session:
-    """In-memory conversation memory.
+    """In-memory conversation memory, with optional local JSON persistence.
 
     Pass the same ``Session`` to successive ``run()`` calls and the agent remembers the prior turns
-    (within the process). The stored messages are canonical (OpenAI-shape).
+    (within the process). The stored messages are canonical (OpenAI-shape). ``save``/``load`` give
+    resumable, local-first persistence (no server); Phase 4 adds durable ``Sink``-shaped stores.
     """
 
     messages: list[dict] = field(default_factory=list)
@@ -39,6 +42,23 @@ class Session:
     def clear(self) -> None:
         """Forget the conversation."""
         self.messages.clear()
+
+    # --- optional local persistence (JSON) ------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Persist the conversation to a local JSON file (creates parent dirs)."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps({"messages": self.messages}, indent=2), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str) -> Session:
+        """Load a conversation from a local JSON file (empty session if the file is absent)."""
+        p = Path(path)
+        if not p.exists():
+            return cls()
+        data = json.loads(p.read_text(encoding="utf-8"))
+        return cls(messages=list(data.get("messages", [])))
 
     def __len__(self) -> int:
         return len(self.messages)

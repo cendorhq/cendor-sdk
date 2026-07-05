@@ -156,6 +156,147 @@ def _resolve_sync(value: Any) -> Any:
     )
 
 
+# ------------------------------------------------------------------------- reusable per-agent loop
+#
+# One agent's turns, sharing a run_id. The orchestrator (orchestration.py) composes these with
+# nested child trace ids and per-agent governance; the single-agent Runner calls them once.
+
+ToolResolver = Any  # Callable[[str], Tool | None]
+
+
+def _client_for(agent: Agent, async_: bool) -> Any:
+    provider = agent.provider_impl
+    if agent.client is not None:
+        return provider.adopt(agent.client, async_=async_)
+    return provider.client(async_=async_, config=agent.config())
+
+
+def run_agent_sync(
+    agent: Agent,
+    messages: list[dict],
+    run_id: str,
+    *,
+    audit: Any = None,
+    max_turns: int | None = None,
+    tools: list | None = None,
+    resolve: ToolResolver = None,
+    handoff_targets: dict[str, str] | None = None,
+) -> tuple[Any, list[Step], str | None]:
+    """Run one agent's turns over ``messages`` (mutated in place).
+
+    Returns ``(output, steps, switched)`` where ``switched`` is a handoff target name if the agent
+    transferred control, else ``None``.
+    """
+    provider = agent.provider_impl
+    create = provider.create_method(_client_for(agent, async_=False))
+    tools = agent.toolset if tools is None else tools
+    resolve = agent.get_tool if resolve is None else resolve
+    handoff_targets = handoff_targets or {}
+    json_mode = agent.output_type is not None
+    turns = max_turns or agent.max_turns
+    output: Any = None
+    switched: str | None = None
+
+    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+        for _turn in range(turns):
+            wire = _assemble(agent, messages)
+            kwargs = provider.build_kwargs(
+                agent.model,
+                wire,
+                tools,
+                agent.instructions,
+                json_mode=json_mode,
+                temperature=agent.temperature,
+                max_tokens=agent.max_tokens,
+            )
+            parsed = provider.parse(create(**kwargs))
+            messages.append(assistant_message(parsed.content, parsed.tool_calls))
+            if parsed.tool_calls:
+                for tc in parsed.tool_calls:
+                    result = _exec_tool_sync(resolve, tc)
+                    messages.append(tool_result_message(tc.id, tc.name, result))
+                    if tc.name in handoff_targets:
+                        switched = handoff_targets[tc.name]
+                if switched:
+                    break
+                continue
+            output = parsed.content
+            break
+
+    return output, [_step(agent.name, e) for e in events], switched
+
+
+async def run_agent_async(
+    agent: Agent,
+    messages: list[dict],
+    run_id: str,
+    *,
+    audit: Any = None,
+    max_turns: int | None = None,
+    tools: list | None = None,
+    resolve: ToolResolver = None,
+    handoff_targets: dict[str, str] | None = None,
+) -> tuple[Any, list[Step], str | None]:
+    """Async counterpart of :func:`run_agent_sync`."""
+    provider = agent.provider_impl
+    create = provider.create_method(_client_for(agent, async_=True))
+    tools = agent.toolset if tools is None else tools
+    resolve = agent.get_tool if resolve is None else resolve
+    handoff_targets = handoff_targets or {}
+    json_mode = agent.output_type is not None
+    turns = max_turns or agent.max_turns
+    output: Any = None
+    switched: str | None = None
+
+    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+        for _turn in range(turns):
+            wire = _assemble(agent, messages)
+            kwargs = provider.build_kwargs(
+                agent.model,
+                wire,
+                tools,
+                agent.instructions,
+                json_mode=json_mode,
+                temperature=agent.temperature,
+                max_tokens=agent.max_tokens,
+            )
+            parsed = provider.parse(await create(**kwargs))
+            messages.append(assistant_message(parsed.content, parsed.tool_calls))
+            if parsed.tool_calls:
+                for tc in parsed.tool_calls:
+                    result = await _exec_tool_async(resolve, tc)
+                    messages.append(tool_result_message(tc.id, tc.name, result))
+                    if tc.name in handoff_targets:
+                        switched = handoff_targets[tc.name]
+                if switched:
+                    break
+                continue
+            output = parsed.content
+            break
+
+    return output, [_step(agent.name, e) for e in events], switched
+
+
+def _exec_tool_sync(resolve: ToolResolver, tc: Any) -> str:
+    tool = resolve(tc.name)
+    if tool is None:
+        return f"[error] unknown tool: {tc.name}"
+    try:
+        return _stringify_result(_resolve_sync(tool.invoke(tc.arguments)))
+    except Exception as e:  # noqa: BLE001 - surface tool errors to the model, keep the loop alive
+        return f"[error] {type(e).__name__}: {e}"
+
+
+async def _exec_tool_async(resolve: ToolResolver, tc: Any) -> str:
+    tool = resolve(tc.name)
+    if tool is None:
+        return f"[error] unknown tool: {tc.name}"
+    try:
+        return _stringify_result(await tool.ainvoke(tc.arguments))
+    except Exception as e:  # noqa: BLE001 - surface tool errors to the model, keep the loop alive
+        return f"[error] {type(e).__name__}: {e}"
+
+
 # --------------------------------------------------------------------------- Runner
 
 
@@ -175,123 +316,32 @@ class Runner:
         self.audit = audit
         self.max_turns = max_turns or agent.max_turns
 
-    # --- sync ----------------------------------------------------------------------------------
-
     def run(self, input: Any) -> Result:
-        agent = self.agent
-        provider = agent.provider_impl
-        client = (
-            provider.adopt(agent.client, async_=False)
-            if agent.client is not None
-            else provider.client(async_=False, config=agent.config())
-        )
-        create = provider.create_method(client)
-        messages = _prepare_messages(agent, input, self.session)
-        json_mode = agent.output_type is not None
+        messages = _prepare_messages(self.agent, input, self.session)
         run_id = uuid.uuid4().hex
-        output: Any = None
-
-        with (
-            _collector(run_id) as events,
-            trace(run_id),
-            _decision(self.audit, agent, input, run_id),
-        ):
-            for _turn in range(self.max_turns):
-                wire = _assemble(agent, messages)
-                kwargs = provider.build_kwargs(
-                    agent.model,
-                    wire,
-                    agent.toolset,
-                    agent.instructions,
-                    json_mode=json_mode,
-                    temperature=agent.temperature,
-                    max_tokens=agent.max_tokens,
-                )
-                response = create(**kwargs)
-                parsed = provider.parse(response)
-                messages.append(assistant_message(parsed.content, parsed.tool_calls))
-                if parsed.tool_calls:
-                    for tc in parsed.tool_calls:
-                        result = self._exec_tool_sync(tc)
-                        messages.append(tool_result_message(tc.id, tc.name, result))
-                    continue
-                output = parsed.content
-                break
-
-        return self._finalize(run_id, output, events, messages)
-
-    def _exec_tool_sync(self, tc: Any) -> str:
-        tool = self.agent.get_tool(tc.name)
-        if tool is None:
-            return f"[error] unknown tool: {tc.name}"
-        try:
-            return _stringify_result(_resolve_sync(tool.invoke(tc.arguments)))
-        except Exception as e:  # noqa: BLE001 - surface tool errors to the model, keep the loop alive
-            return f"[error] {type(e).__name__}: {e}"
-
-    # --- async ---------------------------------------------------------------------------------
-
-    async def run_async(self, input: Any) -> Result:
-        agent = self.agent
-        provider = agent.provider_impl
-        client = (
-            provider.adopt(agent.client, async_=True)
-            if agent.client is not None
-            else provider.client(async_=True, config=agent.config())
+        output, steps, _ = run_agent_sync(
+            self.agent, messages, run_id, audit=self.audit, max_turns=self.max_turns
         )
-        create = provider.create_method(client)
-        messages = _prepare_messages(agent, input, self.session)
-        json_mode = agent.output_type is not None
-        run_id = uuid.uuid4().hex
-        output: Any = None
-
-        with (
-            _collector(run_id) as events,
-            trace(run_id),
-            _decision(self.audit, agent, input, run_id),
-        ):
-            for _turn in range(self.max_turns):
-                wire = _assemble(agent, messages)
-                kwargs = provider.build_kwargs(
-                    agent.model,
-                    wire,
-                    agent.toolset,
-                    agent.instructions,
-                    json_mode=json_mode,
-                    temperature=agent.temperature,
-                    max_tokens=agent.max_tokens,
-                )
-                response = await create(**kwargs)
-                parsed = provider.parse(response)
-                messages.append(assistant_message(parsed.content, parsed.tool_calls))
-                if parsed.tool_calls:
-                    for tc in parsed.tool_calls:
-                        result = await self._exec_tool_async(tc)
-                        messages.append(tool_result_message(tc.id, tc.name, result))
-                    continue
-                output = parsed.content
-                break
-
-        return self._finalize(run_id, output, events, messages)
-
-    async def _exec_tool_async(self, tc: Any) -> str:
-        tool = self.agent.get_tool(tc.name)
-        if tool is None:
-            return f"[error] unknown tool: {tc.name}"
-        try:
-            return _stringify_result(await tool.ainvoke(tc.arguments))
-        except Exception as e:  # noqa: BLE001 - surface tool errors to the model, keep the loop alive
-            return f"[error] {type(e).__name__}: {e}"
-
-    # --- finalize ------------------------------------------------------------------------------
-
-    def _finalize(self, run_id: str, output: Any, events: list, messages: list[dict]) -> Result:
-        parsed_output = _parse_output(output, self.agent.output_type)
-        steps = [_step(self.agent.name, ev) for ev in events]
         if self.session is not None:
             self.session.replace(messages)
         return Result(
-            output=parsed_output,
+            output=_parse_output(output, self.agent.output_type),
+            steps=steps,
+            trace_id=run_id,
+            agents=[self.agent.name],
+            messages=messages,
+        )
+
+    async def run_async(self, input: Any) -> Result:
+        messages = _prepare_messages(self.agent, input, self.session)
+        run_id = uuid.uuid4().hex
+        output, steps, _ = await run_agent_async(
+            self.agent, messages, run_id, audit=self.audit, max_turns=self.max_turns
+        )
+        if self.session is not None:
+            self.session.replace(messages)
+        return Result(
+            output=_parse_output(output, self.agent.output_type),
             steps=steps,
             trace_id=run_id,
             agents=[self.agent.name],
@@ -303,28 +353,41 @@ class Runner:
 
 
 class _Run:
-    """The ``run`` callable: ``run(agent, input)`` (sync) and ``run.aio(agent, input)`` (async)."""
+    """The ``run`` callable.
+
+    - ``run(agent, input)`` — a single agent (sync); ``run.aio(...)`` async.
+    - ``run([entry, peer, ...], input)`` — multi-agent: the first agent is the entry point and the
+      rest are reachable by handoff (plan §5). Dispatches to :mod:`cendor.sdk.orchestration`.
+    """
 
     def __call__(
         self,
-        agent: Agent,
+        agent: Any,
         input: Any,
         *,
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
     ) -> Result:
+        if isinstance(agent, (list, tuple)):
+            from .orchestration import run_agents
+
+            return run_agents(list(agent), input, audit=audit, max_turns=max_turns)
         return Runner(agent, session=session, audit=audit, max_turns=max_turns).run(input)
 
     async def aio(
         self,
-        agent: Agent,
+        agent: Any,
         input: Any,
         *,
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
     ) -> Result:
+        if isinstance(agent, (list, tuple)):
+            from .orchestration import run_agents_async
+
+            return await run_agents_async(list(agent), input, audit=audit, max_turns=max_turns)
         return await Runner(agent, session=session, audit=audit, max_turns=max_turns).run_async(
             input
         )
