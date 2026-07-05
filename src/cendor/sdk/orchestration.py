@@ -124,6 +124,7 @@ def run_agents(
     max_turns: int | None = None,
     session: Any = None,
     checkpoint: Any = None,
+    on_step: Any = None,
 ) -> Result:
     """Run a handoff/supervised team: ``agents[0]`` is the entry; peers are reached by handoff.
 
@@ -173,6 +174,7 @@ def run_agents(
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
                 on_turn=on_turn,
+                on_step=on_step,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
@@ -202,6 +204,7 @@ async def run_agents_async(
     max_turns: int | None = None,
     session: Any = None,
     checkpoint: Any = None,
+    on_step: Any = None,
 ) -> Result:
     """Async counterpart of :func:`run_agents` (same segment/turn checkpointing)."""
     from .checkpoint import _as_checkpointer
@@ -245,6 +248,7 @@ async def run_agents_async(
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
                 on_turn=on_turn,
+                on_step=on_step,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
