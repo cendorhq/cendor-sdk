@@ -22,6 +22,7 @@ from cendor.core import bus, trace
 from cendor.core.types import LLMCall, ToolCall
 
 from .providers import assistant_message, tool_result_message
+from .resilience import RetryPolicy, acall_with_retry, call_with_retry
 from .result import Result, Step
 
 if TYPE_CHECKING:
@@ -191,11 +192,14 @@ def run_agent_sync(
     tools: list | None = None,
     resolve: ToolResolver = None,
     handoff_targets: dict[str, str] | None = None,
+    retry: RetryPolicy | None = None,
+    on_turn: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
     """Run one agent's turns over ``messages`` (mutated in place).
 
-    Returns ``(output, steps, switched)`` where ``switched`` is a handoff target name if the agent
-    transferred control, else ``None``.
+    Returns ``(output, steps, switched)`` — ``switched`` is a handoff target name if the agent
+    transferred control, else ``None``. ``retry`` retries transient model calls; ``on_turn`` (if
+    set) is called with ``messages`` after each turn — the checkpoint hook.
     """
     provider = agent.provider_impl
     create = provider.create_method(_client_for(agent, async_=False))
@@ -219,7 +223,7 @@ def run_agent_sync(
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
             )
-            parsed = provider.parse(create(**kwargs))
+            parsed = provider.parse(call_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
                 for tc in parsed.tool_calls:
@@ -227,10 +231,14 @@ def run_agent_sync(
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     if tc.name in handoff_targets:
                         switched = handoff_targets[tc.name]
+                if on_turn is not None:
+                    on_turn(messages)
                 if switched:
                     break
                 continue
             output = parsed.content
+            if on_turn is not None:
+                on_turn(messages)
             break
 
     return output, [_step(agent.name, e) for e in events], switched
@@ -246,6 +254,8 @@ async def run_agent_async(
     tools: list | None = None,
     resolve: ToolResolver = None,
     handoff_targets: dict[str, str] | None = None,
+    retry: RetryPolicy | None = None,
+    on_turn: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
     """Async counterpart of :func:`run_agent_sync`."""
     provider = agent.provider_impl
@@ -270,7 +280,7 @@ async def run_agent_async(
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
             )
-            parsed = provider.parse(await create(**kwargs))
+            parsed = provider.parse(await acall_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
                 for tc in parsed.tool_calls:
@@ -278,10 +288,14 @@ async def run_agent_async(
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     if tc.name in handoff_targets:
                         switched = handoff_targets[tc.name]
+                if on_turn is not None:
+                    on_turn(messages)
                 if switched:
                     break
                 continue
             output = parsed.content
+            if on_turn is not None:
+                on_turn(messages)
             break
 
     return output, [_step(agent.name, e) for e in events], switched
@@ -311,7 +325,11 @@ async def _exec_tool_async(resolve: ToolResolver, tc: Any) -> str:
 
 
 class Runner:
-    """Drives one agent's loop. ``run`` (sync) / ``run_async`` (async)."""
+    """Drives one agent's loop. ``run`` (sync) / ``run_async`` (async).
+
+    ``retry`` retries transient model calls; ``checkpoint`` (a path or ``Checkpointer``) persists
+    the conversation after each turn so a crashed run resumes without re-doing completed work.
+    """
 
     def __init__(
         self,
@@ -320,43 +338,73 @@ class Runner:
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
+        retry: RetryPolicy | None = None,
+        checkpoint: Any = None,
     ) -> None:
+        from .checkpoint import _as_checkpointer
+
         self.agent = agent
         self.session = session
         self.audit = audit
         self.max_turns = max_turns or agent.max_turns
+        self.retry = retry
+        self.checkpoint = _as_checkpointer(checkpoint)
+
+    def _start(self, input: Any) -> tuple[list[dict], str, Any]:
+        """Resolve starting messages (resuming from a checkpoint if one is unfinished)."""
+        resume = self.checkpoint.resumable_messages() if self.checkpoint else None
+        if resume is not None:
+            messages = resume
+        else:
+            messages = _prepare_messages(self.agent, input, self.session)
+        run_id = uuid.uuid4().hex
+
+        def on_turn(msgs: list[dict]) -> None:
+            if self.checkpoint is not None:
+                self.checkpoint.save({"run_id": run_id, "messages": msgs, "done": False})
+
+        return messages, run_id, (on_turn if self.checkpoint is not None else None)
+
+    def _finish(self, run_id: str, output: Any, steps: list, messages: list[dict]) -> Result:
+        if self.session is not None:
+            self.session.replace(messages)
+        if self.checkpoint is not None:
+            self.checkpoint.save(
+                {"run_id": run_id, "messages": messages, "done": True, "output": output}
+            )
+        return Result(
+            output=_parse_output(output, self.agent.output_type),
+            steps=steps,
+            trace_id=run_id,
+            agents=[self.agent.name],
+            messages=messages,
+        )
 
     def run(self, input: Any) -> Result:
-        messages = _prepare_messages(self.agent, input, self.session)
-        run_id = uuid.uuid4().hex
+        messages, run_id, on_turn = self._start(input)
         output, steps, _ = run_agent_sync(
-            self.agent, messages, run_id, audit=self.audit, max_turns=self.max_turns
+            self.agent,
+            messages,
+            run_id,
+            audit=self.audit,
+            max_turns=self.max_turns,
+            retry=self.retry,
+            on_turn=on_turn,
         )
-        if self.session is not None:
-            self.session.replace(messages)
-        return Result(
-            output=_parse_output(output, self.agent.output_type),
-            steps=steps,
-            trace_id=run_id,
-            agents=[self.agent.name],
-            messages=messages,
-        )
+        return self._finish(run_id, output, steps, messages)
 
     async def run_async(self, input: Any) -> Result:
-        messages = _prepare_messages(self.agent, input, self.session)
-        run_id = uuid.uuid4().hex
+        messages, run_id, on_turn = self._start(input)
         output, steps, _ = await run_agent_async(
-            self.agent, messages, run_id, audit=self.audit, max_turns=self.max_turns
+            self.agent,
+            messages,
+            run_id,
+            audit=self.audit,
+            max_turns=self.max_turns,
+            retry=self.retry,
+            on_turn=on_turn,
         )
-        if self.session is not None:
-            self.session.replace(messages)
-        return Result(
-            output=_parse_output(output, self.agent.output_type),
-            steps=steps,
-            trace_id=run_id,
-            agents=[self.agent.name],
-            messages=messages,
-        )
+        return self._finish(run_id, output, steps, messages)
 
 
 # --------------------------------------------------------------------------- run() entrypoint
@@ -378,12 +426,21 @@ class _Run:
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
+        retry: RetryPolicy | None = None,
+        checkpoint: Any = None,
     ) -> Result:
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents
 
             return run_agents(list(agent), input, audit=audit, max_turns=max_turns)
-        return Runner(agent, session=session, audit=audit, max_turns=max_turns).run(input)
+        return Runner(
+            agent,
+            session=session,
+            audit=audit,
+            max_turns=max_turns,
+            retry=retry,
+            checkpoint=checkpoint,
+        ).run(input)
 
     async def aio(
         self,
@@ -393,14 +450,21 @@ class _Run:
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
+        retry: RetryPolicy | None = None,
+        checkpoint: Any = None,
     ) -> Result:
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents_async
 
             return await run_agents_async(list(agent), input, audit=audit, max_turns=max_turns)
-        return await Runner(agent, session=session, audit=audit, max_turns=max_turns).run_async(
-            input
-        )
+        return await Runner(
+            agent,
+            session=session,
+            audit=audit,
+            max_turns=max_turns,
+            retry=retry,
+            checkpoint=checkpoint,
+        ).run_async(input)
 
 
 run = _Run()

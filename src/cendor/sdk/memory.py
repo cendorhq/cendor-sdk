@@ -62,3 +62,52 @@ class Session:
 
     def __len__(self) -> int:
         return len(self.messages)
+
+
+class SQLiteSessionStore:
+    """A durable, local session store (Phase 4): conversations keyed by id in SQLite.
+
+    Local-first — a single file on disk, no server. Use it to persist and resume many named
+    conversations across processes.
+
+    ```python
+    store = SQLiteSessionStore("sessions.db")
+    session = store.load("user-42")          # empty Session if unknown
+    run(agent, "hi", session=session)
+    store.save("user-42", session)           # durable across restarts
+    ```
+    """
+
+    def __init__(self, path: str) -> None:
+        import sqlite3
+
+        self._conn = sqlite3.connect(path, check_same_thread=False)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, messages TEXT NOT NULL)"
+        )
+        self._conn.commit()
+
+    def save(self, session_id: str, session: Session) -> None:
+        """Persist a session's messages under ``session_id`` (upsert)."""
+        self._conn.execute(
+            "INSERT OR REPLACE INTO sessions (id, messages) VALUES (?, ?)",
+            (session_id, json.dumps(session.messages)),
+        )
+        self._conn.commit()
+
+    def load(self, session_id: str) -> Session:
+        """Load a session by id (an empty ``Session`` if unknown)."""
+        row = self._conn.execute(
+            "SELECT messages FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+        if row is None:
+            return Session()
+        return Session(messages=list(json.loads(row[0])))
+
+    def ids(self) -> list[str]:
+        """All stored session ids."""
+        return [r[0] for r in self._conn.execute("SELECT id FROM sessions").fetchall()]
+
+    def close(self) -> None:
+        """Close the underlying connection."""
+        self._conn.close()
