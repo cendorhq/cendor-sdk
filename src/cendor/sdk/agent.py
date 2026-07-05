@@ -42,7 +42,8 @@ class Agent:
     context_budget: int | None = None
     temperature: float | None = None
     max_tokens: int | None = None
-    handoffs: list[str] = field(default_factory=list)
+    handoffs: list[Any] = field(default_factory=list)
+    max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator, Phase 2)
     api_key: str | None = None
     base_url: str | None = None
     client: Any = None
