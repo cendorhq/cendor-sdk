@@ -305,6 +305,8 @@ def run_agent_sync(
             )
             if agent.extra:
                 kwargs.update(agent.extra)  # provider-param passthrough (tool_choice, reasoning, …)
+            if agent.cache:
+                kwargs = provider.apply_cache(kwargs)
             parsed = provider.parse(call_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
@@ -370,6 +372,8 @@ async def run_agent_async(
             )
             if agent.extra:
                 kwargs.update(agent.extra)  # provider-param passthrough (tool_choice, reasoning, …)
+            if agent.cache:
+                kwargs = provider.apply_cache(kwargs)
             parsed = provider.parse(await acall_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
@@ -544,6 +548,8 @@ def stream_agent_sync(
             )
             if agent.extra:
                 kwargs.update(agent.extra)
+            if agent.cache:
+                kwargs = provider.apply_cache(kwargs)
             if provider.supports_stream:
                 chunks: list = []
                 for chunk in create(**{**kwargs, "stream": True}):
@@ -615,6 +621,8 @@ async def stream_agent_async(
             )
             if agent.extra:
                 kwargs.update(agent.extra)
+            if agent.cache:
+                kwargs = provider.apply_cache(kwargs)
             if provider.supports_stream:
                 chunks = []
                 stream = await create(**{**kwargs, "stream": True})

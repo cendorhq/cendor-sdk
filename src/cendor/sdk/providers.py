@@ -315,6 +315,15 @@ class Provider:
     ) -> dict:
         raise NotImplementedError
 
+    def apply_cache(self, kwargs: dict) -> dict:
+        """Mark a stable request prefix for provider prompt caching (``Agent(cache=True)``).
+
+        Base no-op: most providers cache automatically (OpenAI) or expose no explicit markers.
+        Anthropic overrides this to add a ``cache_control`` breakpoint. Called by the runner after
+        ``build_kwargs`` + the ``extra`` merge, so it operates on the final request shape.
+        """
+        return kwargs
+
     # --- inbound --------------------------------------------------------------------------------
 
     def parse(self, response: Any) -> ParsedResponse:
@@ -596,6 +605,24 @@ class AnthropicProvider(Provider):
             kwargs["tools"] = formatted
         if temperature is not None:
             kwargs["temperature"] = temperature
+        return kwargs
+
+    def apply_cache(self, kwargs: dict) -> dict:
+        """Enable Anthropic prompt caching: put a ``cache_control`` breakpoint on the system prompt
+        and (if present) the last tool definition — caching the stable instructions + tool-schema
+        prefix. Anthropic caches everything up to and including a marked block, so one breakpoint
+        on the last tool covers all tools. Cache reads/writes return as usage, priced by core.
+        """
+        cc = {"type": "ephemeral"}
+        system = kwargs.get("system")
+        if isinstance(system, str) and system:
+            # string form → a single text block carrying the breakpoint
+            kwargs["system"] = [{"type": "text", "text": system, "cache_control": cc}]
+        elif isinstance(system, list) and system:
+            kwargs["system"] = [*system[:-1], {**system[-1], "cache_control": cc}]
+        tools = kwargs.get("tools")
+        if isinstance(tools, list) and tools:
+            kwargs["tools"] = [*tools[:-1], {**tools[-1], "cache_control": cc}]
         return kwargs
 
     def parse(self, response: Any) -> ParsedResponse:
