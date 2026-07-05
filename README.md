@@ -35,10 +35,13 @@ PII is redacted *before* send, and the whole run correlates under one `trace_id`
 
 ```bash
 pip install "cendor-sdk[openai,anthropic]"     # provider SDKs are optional extras
+pip install "cendor-sdk[all]"                  # every provider + interop, batteries included
 ```
 
 The install bundles the whole Cendor stack (`cendor-core`, `tokenguard`, `acttrace`, `contextkit`,
-`squeeze`, `cassette`) by dependency — you install once and import only from `cendor.sdk`.
+`squeeze`, `cassette`) by dependency — you install once and import only from `cendor.sdk`. Provider
+SDKs stay optional extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`, `[ollama]`,
+`[huggingface]`, `[azure]`, `[foundry-local]`, plus `[mcp]` and `[otel]`.
 
 ## The killer example — a governed agent in 10 lines
 
@@ -120,9 +123,38 @@ print(result.agents)     # ["planner", "writer"]
 
 See [docs/multi-agent.md](docs/multi-agent.md).
 
+## Every major provider — one canonical loop
+
+The provider is inferred from the model id (override with `provider=`). History is held in one
+canonical shape, so a run can **hand off between providers** without rewriting it.
+
+| Provider | Models | Extra |
+|---|---|---|
+| **OpenAI** | Chat Completions + Responses API | `[openai]` |
+| **Anthropic** | Messages API | `[anthropic]` |
+| **Google Gemini** | `google-genai` | `[google]` |
+| **AWS Bedrock** | Converse API | `[bedrock]` |
+| **Ollama** | local models | `[ollama]` |
+| **Hugging Face** | Inference / endpoints | `[huggingface]` |
+| **Azure AI Foundry** | deployments via the OpenAI v1 endpoint (Chat + Responses) | `[azure]` |
+| **Foundry Local** | on-device, OpenAI-compatible | `[foundry-local]` |
+
+## More in the box
+
+Everything a real agent needs — all governed through the same seams:
+
+- **Streaming** — `run.stream` / `run.astream` yield text deltas + tool events (native for the OpenAI family + Ollama).
+- **Structured output** — a dataclass / Pydantic / JSON-schema `output_type` uses each provider's native schema mode.
+- **Reasoning & control** — `Agent.extra` passes `tool_choice`, `reasoning_effort`, `top_p`, `stop`, …; o-series `temperature` is handled for you.
+- **RAG** — `VectorIndex` + `Agent(retriever=…)` inject governed retrieval, or expose your store as a `@tool`.
+- **Memory** — `Session` (conversation), `SummarizingSession` (rolling summary), `SQLiteSessionStore` (durable), `context_budget` (fit the window).
+- **Embeddings** — `embed()` / `aembed()` capture RAG calls on the same cost/audit tree.
+- **Cost governance for any model** — `register_model_price(...)` so budgets bind on custom / deployment-named ids.
+
 ## Status — v1.0.0 (stable)
 
-All four phases are shipped, tested offline, and documented.
+All four phases are shipped, tested offline, and documented; provider coverage and agent capabilities
+have since been rounded out (streaming, RAG, memory, Hugging Face / Azure Foundry / Foundry Local).
 
 | Phase | Scope | State |
 |---|---|---|
