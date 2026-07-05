@@ -12,9 +12,9 @@
 `cendor-sdk` **owns the agent loop**, so every governance concern that is best-effort *beneath* a
 framework becomes first-class here: usage is never lost, budgets enforce *before* the model call,
 PII is redacted *before* send, and the whole run correlates under one `trace_id`. It's the simple,
-batteries-included door into the [Cendor](https://github.com/cendorhq/Cendor) stack — you don't need
+batteries-included door into the [Cendor](https://github.com/cendorhq/cendor-libs) stack — you don't need
 to pick a framework or wire the libraries. (Already have a framework? Compose the libraries beneath
-it: `pip install cendor`.)
+it: `pip install cendor-libs`.)
 
 ## Install
 

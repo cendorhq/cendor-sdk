@@ -1,7 +1,7 @@
 # cendor-sdk — repository
 
 Source for **`cendor-sdk`**, the governed, provider-agnostic agent SDK — the second door into the
-[Cendor](https://github.com/cendorhq/Cendor) stack.
+[Cendor](https://github.com/cendorhq/cendor-libs) stack.
 
 ![CI](https://github.com/cendorhq/cendor-sdk/actions/workflows/ci.yml/badge.svg) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue)
 
