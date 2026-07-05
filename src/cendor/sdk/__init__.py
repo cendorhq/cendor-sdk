@@ -59,7 +59,7 @@ from .result import Result, Run, Step
 from .runner import Runner, run
 from .tools import Tool, tool
 
-__version__ = "0.4.0"
+__version__ = "1.0.0"
 
 __all__ = [
     # agent + loop
