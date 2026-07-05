@@ -43,7 +43,7 @@ def test_json_schema_dict_output(build):
 
 
 def test_json_mode_requests_json_from_provider(build):
-    """When output_type is set, the outbound request asks the provider for JSON."""
+    """With an output_type, OpenAI uses its native json_schema format (beats json_object)."""
     agent = Agent(name="w", model="gpt-4o", instructions="Report.", output_type=Weather)
     with respx.mock as mock:
         route = mock.post(build.CHAT_URL).mock(
@@ -52,4 +52,18 @@ def test_json_mode_requests_json_from_provider(build):
         run(agent, "weather?")
     body = route.calls.last.request.content.decode()
     assert "response_format" in body
-    assert "json_object" in body
+    assert "json_schema" in body  # native schema-constrained output
+    assert "conditions" in body  # the derived schema is actually sent
+
+
+def test_agent_extra_passthrough(build):
+    """Agent.extra is merged into the outbound request (tool_choice / top_p / reasoning_effort)."""
+    agent = Agent(
+        name="a", model="gpt-4o", instructions="x", extra={"tool_choice": "required", "top_p": 0.1}
+    )
+    with respx.mock as mock:
+        route = mock.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        run(agent, "hi")
+    body = route.calls.last.request.content.decode()
+    assert "tool_choice" in body
+    assert "top_p" in body

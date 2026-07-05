@@ -28,6 +28,13 @@ class Agent:
         max_turns: Upper bound on ReAct iterations (loop-termination guarantee).
         context_budget: If set, assemble the history to this token budget via ``contextkit``.
         temperature / max_tokens: Optional generation controls.
+        extra: Extra provider request kwargs merged into every model call — the passthrough for
+            things the SDK doesn't model first-class (``tool_choice``, ``reasoning_effort``,
+            ``top_p``, ``stop``, ``seed``, ``response_format``, ``extra_body``, …). Merged at the
+            top level of the request, matching the OpenAI/Anthropic/Ollama/HF/Azure shape.
+        retriever: Optional ``query -> list[str]`` callable (e.g. ``VectorIndex.as_retriever()``).
+            When set, context is retrieved for the run's query and injected as a system message
+            before the call — "always-on" RAG. (For agentic retrieval, expose it as a tool instead.)
         handoffs: Names of peer agents this agent may transfer to (Phase 2).
         api_key / base_url / client: Optional client config, or an explicit instrumented client.
     """
@@ -42,6 +49,8 @@ class Agent:
     context_budget: int | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+    retriever: Any = None  # Callable[[str], list[str]] — injected as context when set (RAG)
     handoffs: list[Any] = field(default_factory=list)
     max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator, Phase 2)
     api_key: str | None = None

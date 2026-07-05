@@ -15,7 +15,7 @@ import inspect
 import types
 import typing
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields, is_dataclass
 from typing import Any, Literal, Union, get_args, get_origin
 
 from cendor.core import instrument_tool
@@ -63,6 +63,34 @@ def _schema_for_annotation(annotation: Any) -> dict:
         return {"type": "array"}
     if annotation is dict:
         return {"type": "object"}
+
+    # Nested Pydantic model → its own JSON Schema.
+    if hasattr(annotation, "model_json_schema"):
+        try:
+            return annotation.model_json_schema()
+        except Exception:  # noqa: BLE001 - fall through to unconstrained
+            return {"type": "object"}
+
+    # Nested dataclass → an object schema built from its fields (recursively).
+    if is_dataclass(annotation) and isinstance(annotation, type):
+        try:
+            hints = typing.get_type_hints(annotation)
+        except Exception:  # noqa: BLE001
+            hints = {}
+        props: dict[str, Any] = {}
+        required: list[str] = []
+        for f in fields(annotation):
+            props[f.name] = _schema_for_annotation(hints.get(f.name, f.type))
+            if f.default is MISSING and f.default_factory is MISSING:
+                required.append(f.name)
+        obj_schema: dict[str, Any] = {
+            "type": "object",
+            "properties": props,
+            "additionalProperties": False,
+        }
+        if required:
+            obj_schema["required"] = required
+        return obj_schema
 
     # Unknown / complex — leave unconstrained rather than emit an invalid schema.
     return {}
