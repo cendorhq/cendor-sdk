@@ -6,6 +6,27 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — Phase 4: Production hardening & governed eval
+
+The "safe for real workloads" layer plus the testing wedge fully realized.
+
+### Added
+- **Retries & backoff** — `RetryPolicy` retries transient model-call failures (timeouts,
+  connection errors, rate limits, 5xx) with exponential backoff; governance decisions
+  (`BudgetExceeded`/`PolicyViolation`) are never retried. `run(..., retry=RetryPolicy(...))`.
+- **Checkpointed / resumable runs** — `run(..., checkpoint="run.ckpt.json")` persists the
+  conversation after each turn; re-running with the same checkpoint resumes without re-executing
+  completed tools. Backed by `Checkpointer` (atomic local JSON).
+- **Durable memory** — `SQLiteSessionStore` persists many named conversations locally (no server);
+  `Session.save`/`Session.load` for JSON.
+- **Governed eval / regression harness** — `evaluate(agent, [EvalCase(...)])` replays recorded
+  cassettes as tests and asserts output, tool sequence, and cost/token ceilings; cost/tokens are
+  real on replay. `EvalReport.assert_ok()` fails CI on a behaviour *or* spend regression.
+- **Docs/examples**: `docs/hardening.md`, `docs/eval.md`; `examples/eval_suite.py`.
+- **Tests** (+9): transient failure recovers, retry gives up / doesn't retry non-transient, a
+  checkpointed run resumes after a simulated crash, SQLite durable memory round-trips, and an eval
+  suite catches a cost regression + a tool-sequence change.
+
 ## [0.3.0] — Phase 3: Ecosystem & interop
 
 Governed `cendor-sdk` agents become first-class citizens elsewhere — all optional and local-first.
