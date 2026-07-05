@@ -662,6 +662,201 @@ async def stream_agent_async(
     )
 
 
+def stream_agents_sync(
+    agents: list[Agent],
+    input: Any,
+    *,
+    session: Session | None = None,
+    audit: Any = None,
+    max_turns: int | None = None,
+) -> Any:
+    """Stream a **multi-agent** (handoff) run as events; one terminal ``RunComplete`` carries the
+    aggregate ``Result``. Mirrors :func:`run_agents`' segment loop, streaming each active agent's
+    turns and switching when it calls a ``transfer_to_<peer>`` tool."""
+    from .orchestration import _effective, _scope
+
+    registry = {a.name: a for a in agents}
+    parent = uuid.uuid4().hex
+    messages = _prepare_messages(agents[0], input, session)
+    active = agents[0]
+    seen: list[str] = []
+    steps: list = []
+    output: Any = None
+    for seg in range(2 * len(registry) + 2):
+        if active.name not in seen:
+            seen.append(active.name)
+        child = f"{parent}:{active.name}#{seg}"
+        tools, tool_map, transfer_map = _effective(active, registry)
+        provider = active.provider_impl
+        create = provider.create_method(_client_for(active, async_=False))
+        json_mode = active.output_type is not None
+        turns = max_turns or active.max_turns
+        switched: str | None = None
+        with (
+            _scope(active),
+            _collector(child, agent_name=active.name) as events,
+            trace(child),
+            _decision(audit, active, messages, child),
+        ):
+            for _turn in range(turns):
+                wire = _assemble(active, messages)
+                kwargs = provider.build_kwargs(
+                    active.model,
+                    wire,
+                    tools,
+                    active.instructions,
+                    json_mode=json_mode,
+                    temperature=active.temperature,
+                    max_tokens=active.max_tokens,
+                    output_schema=_schema_from_output_type(active.output_type),
+                )
+                if active.extra:
+                    kwargs.update(active.extra)
+                if active.cache:
+                    kwargs = provider.apply_cache(kwargs)
+                if provider.supports_stream:
+                    chunks: list = []
+                    for chunk in create(**{**kwargs, "stream": True}):
+                        chunks.append(chunk)
+                        delta = provider.stream_text(chunk)
+                        if delta:
+                            yield TextDelta(delta)
+                    parsed = provider.parse_stream(chunks)
+                else:
+                    parsed = provider.parse(create(**kwargs))
+                    if parsed.content:
+                        yield TextDelta(parsed.content)
+                messages.append(assistant_message(parsed.content, parsed.tool_calls))
+                if parsed.tool_calls:
+                    for tc in parsed.tool_calls:
+                        yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                        result = _exec_tool_sync(tool_map.get, tc)
+                        messages.append(tool_result_message(tc.id, tc.name, result))
+                        yield ToolResultEvent(tc.name, result)
+                        if tc.name in transfer_map:
+                            switched = transfer_map[tc.name]
+                    if switched:
+                        break
+                    continue
+                output = parsed.content
+                break
+        steps.extend(_step(active.name, e) for e in events)
+        if switched and switched in registry:
+            active = registry[switched]
+            continue
+        break
+
+    if session is not None:
+        session.replace(messages)
+    yield RunComplete(
+        Result(
+            output=_parse_output(output, active.output_type),
+            steps=steps,
+            trace_id=parent,
+            agents=seen,
+            messages=messages,
+            incomplete=output is None,
+        )
+    )
+
+
+async def stream_agents_async(
+    agents: list[Agent],
+    input: Any,
+    *,
+    session: Session | None = None,
+    audit: Any = None,
+    max_turns: int | None = None,
+) -> Any:
+    """Async counterpart of :func:`stream_agents_sync` (``async for`` over the events)."""
+    from .orchestration import _effective, _scope
+
+    registry = {a.name: a for a in agents}
+    parent = uuid.uuid4().hex
+    messages = _prepare_messages(agents[0], input, session)
+    active = agents[0]
+    seen: list[str] = []
+    steps: list = []
+    output: Any = None
+    for seg in range(2 * len(registry) + 2):
+        if active.name not in seen:
+            seen.append(active.name)
+        child = f"{parent}:{active.name}#{seg}"
+        tools, tool_map, transfer_map = _effective(active, registry)
+        provider = active.provider_impl
+        create = provider.create_method(_client_for(active, async_=True))
+        json_mode = active.output_type is not None
+        turns = max_turns or active.max_turns
+        switched: str | None = None
+        with (
+            _scope(active),
+            _collector(child, agent_name=active.name) as events,
+            trace(child),
+            _decision(audit, active, messages, child),
+        ):
+            for _turn in range(turns):
+                wire = _assemble(active, messages)
+                kwargs = provider.build_kwargs(
+                    active.model,
+                    wire,
+                    tools,
+                    active.instructions,
+                    json_mode=json_mode,
+                    temperature=active.temperature,
+                    max_tokens=active.max_tokens,
+                    output_schema=_schema_from_output_type(active.output_type),
+                )
+                if active.extra:
+                    kwargs.update(active.extra)
+                if active.cache:
+                    kwargs = provider.apply_cache(kwargs)
+                if provider.supports_stream:
+                    chunks = []
+                    stream = await create(**{**kwargs, "stream": True})
+                    async for chunk in stream:
+                        chunks.append(chunk)
+                        delta = provider.stream_text(chunk)
+                        if delta:
+                            yield TextDelta(delta)
+                    parsed = provider.parse_stream(chunks)
+                else:
+                    parsed = provider.parse(await create(**kwargs))
+                    if parsed.content:
+                        yield TextDelta(parsed.content)
+                messages.append(assistant_message(parsed.content, parsed.tool_calls))
+                if parsed.tool_calls:
+                    for tc in parsed.tool_calls:
+                        yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                        result = await _exec_tool_async(tool_map.get, tc)
+                        messages.append(tool_result_message(tc.id, tc.name, result))
+                        yield ToolResultEvent(tc.name, result)
+                        if tc.name in transfer_map:
+                            switched = transfer_map[tc.name]
+                    if switched:
+                        break
+                    continue
+                output = parsed.content
+                break
+        steps.extend(_step(active.name, e) for e in events)
+        if switched and switched in registry:
+            active = registry[switched]
+            continue
+        break
+
+    if session is not None:
+        session.replace(messages)
+    yield RunComplete(
+        Result(
+            output=_parse_output(output, active.output_type),
+            steps=steps,
+            trace_id=parent,
+            agents=seen,
+            messages=messages,
+            incomplete=output is None,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- run() entrypoint
 
 
@@ -753,10 +948,13 @@ class _Run:
         audit: Any = None,
         max_turns: int | None = None,
     ) -> Any:
-        """Stream a **single** agent run as events (sync generator). Terminal event is
-        ``RunComplete`` carrying the ``Result``. Multi-agent streaming is not supported."""
+        """Stream a run as events (sync generator). Terminal event is ``RunComplete`` carrying the
+        ``Result``. A single agent streams its turns; a list streams a multi-agent handoff run,
+        switching active agents on a ``transfer_to_<peer>`` call — one terminal ``RunComplete``."""
         if isinstance(agent, (list, tuple)):
-            raise TypeError("run.stream supports a single agent; use run([...]) for multi-agent")
+            return stream_agents_sync(
+                list(agent), input, session=session, audit=audit, max_turns=max_turns
+            )
         return stream_agent_sync(agent, input, session=session, audit=audit, max_turns=max_turns)
 
     def astream(
@@ -768,9 +966,12 @@ class _Run:
         audit: Any = None,
         max_turns: int | None = None,
     ) -> Any:
-        """Async counterpart of :meth:`stream` (``async for`` over the events)."""
+        """Async counterpart of :meth:`stream` (``async for`` over the events); a list streams a
+        multi-agent handoff run."""
         if isinstance(agent, (list, tuple)):
-            raise TypeError("run.astream supports a single agent; use run([...]) for multi-agent")
+            return stream_agents_async(
+                list(agent), input, session=session, audit=audit, max_turns=max_turns
+            )
         return stream_agent_async(agent, input, session=session, audit=audit, max_turns=max_turns)
 
 
