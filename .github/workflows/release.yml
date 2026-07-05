@@ -6,14 +6,14 @@ on:
 
 # PyPI **trusted publishing** (OIDC) — no stored API token. Configure a trusted publisher for the
 # `cendor-sdk` project on PyPI with:
-#   Owner: cendorhq · Repository: cendor-sdk · Workflow: release.yml · Environment: pypi
+#   Owner: cendorhq · Repository: cendor-sdk · Workflow: release.yml · Environment: sdk
 # The GitHub OIDC identity of this workflow authenticates the upload; the (repo, workflow, env)
 # triple must match the publisher exactly.
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    environment: pypi
+    environment: sdk
     permissions:
       id-token: write      # OIDC trusted publishing
       contents: write      # checkout (read) + create the GitHub Release (write)
