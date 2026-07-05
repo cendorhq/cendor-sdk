@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "0.4.0"
+version = "1.0.0"
 description = "A governed, provider-agnostic agent SDK — cost budgets, tamper-evident audit, PII redaction, context governance, and record/replay testing as the foundation, not plugins. The second door to the Cendor stack."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -8,7 +8,7 @@ license = "Apache-2.0"
 authors = [{ name = "Cendor" }]
 keywords = ["agent", "sdk", "llm", "governance", "budget", "audit", "openai", "anthropic"]
 classifiers = [
-  "Development Status :: 4 - Beta",
+  "Development Status :: 5 - Production/Stable",
   "Intended Audience :: Developers",
   "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3 :: Only",
