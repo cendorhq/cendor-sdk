@@ -14,6 +14,18 @@ Provider SDKs are optional extras (`[openai]`, `[anthropic]`, `[google]`, `[bedr
 `[huggingface]`, `[azure]`). The install bundles the whole Cendor stack by dependency — import only
 from `cendor.sdk`.
 
+## New in 1.1
+
+- **Live progress** — `run(agent, input, on_step=cb)` calls `cb(step)` as each step completes (single-
+  and multi-agent), alongside the post-hoc `Result.steps`.
+- **Prompt caching** — `Agent(cache=True)` marks the stable prefix for provider prompt caching
+  (Anthropic `cache_control` on the system prompt + tools; a no-op elsewhere). Cached tokens price
+  through automatically, so `Result.cost` reflects the savings.
+- **Multi-agent streaming** — `run.stream([...])` / `run.astream([...])` now stream a handoff run to
+  a terminal `RunComplete` (previously single-agent only).
+- **Live OTel spans** — `with live_spans(): run(...)` emits `gen_ai` spans as the run progresses —
+  the streaming counterpart to the post-hoc `span_tree()`.
+
 ## A governed agent in 10 lines
 
 ```python

@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.0.1"
+version = "1.1.0"
 description = "A governed, provider-agnostic agent SDK — cost budgets, tamper-evident audit, PII redaction, context governance, and record/replay testing as the foundation, not plugins. The second door to the Cendor stack."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
