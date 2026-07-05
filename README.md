@@ -2,7 +2,7 @@
 
 **A governed agent in 10 lines — cost budgets, tamper-evident audit, and PII redaction built in.**
 
-![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: phase 4](https://img.shields.io/badge/status-phase_4-green)
+![version](https://img.shields.io/badge/version-1.0.0-blue) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: stable](https://img.shields.io/badge/status-stable-brightgreen)
 
 *provider-agnostic · local-first · offline by default · sync **and** async*
 
@@ -120,7 +120,9 @@ print(result.agents)     # ["planner", "writer"]
 
 See [docs/multi-agent.md](docs/multi-agent.md).
 
-## Status
+## Status — v1.0.0 (stable)
+
+All four phases are shipped, tested offline, and documented.
 
 | Phase | Scope | State |
 |---|---|---|
