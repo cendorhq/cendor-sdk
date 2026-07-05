@@ -4,6 +4,15 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] — 2026-07-05
+
+### Changed
+- **Packaging & docs only — no code changes.** Split the README into a repo landing (`README.md`)
+  and a clean PyPI project description (`README-pypi.md`, now the `[project.readme]`), so the PyPI
+  page is a self-contained product description with working links. Removed references to the
+  internal `plan/` design docs from the shipped README / docs / CHANGELOG, and untracked `plan/`
+  (kept local, gitignored) so it never ships. The `cendor.sdk` package code is identical to 1.0.0.
+
 ## [1.0.0] — 2026-07-05
 
 First public release on PyPI — the governed agent loop, multi-agent orchestration, ecosystem
@@ -16,7 +25,7 @@ retrieval (RAG), and rolling memory. Requires `cendor-core>=1.3` (Hugging Face d
   `_canonical_to_gemini` / `_canonical_to_bedrock` (functionCall/functionResponse; toolUse/toolResult),
   mirroring the Anthropic translator, with round-trip tests.
 
-### Added — gap-analysis remediation (see `plan/SDK_FIT_GAP_ANALYSIS.md`)
+### Added — gap-analysis remediation
 - **Provider param passthrough** — `Agent.extra` merges arbitrary request kwargs (`tool_choice`,
   `reasoning_effort`, `top_p`, `stop`, `seed`, `response_format`, `extra_body`, …) into every call.
 - **o-series temperature guard** — the OpenAI provider omits `temperature` for `o1`/`o3`/`o4` models

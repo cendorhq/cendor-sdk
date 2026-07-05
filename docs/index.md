@@ -54,4 +54,4 @@ over `acttrace.guard`. Extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]
 3. **Namespace safety.** This distribution ships `cendor.sdk` **only** — never `src/cendor/__init__.py`.
 4. **Local-first, no servers.** Cloud / OTel export is always optional and opt-in.
 
-See [the full plan](../plan/CENDOR_SDK_PLAN.md) for the complete design and roadmap.
+See the [CHANGELOG](../CHANGELOG.md) for the release history.
