@@ -6,6 +6,31 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] — Phase 2: Multi-agent orchestration
+
+Orchestration patterns land, with the correlation that was impossible beneath frameworks: a whole
+multi-agent trajectory is one governed, correlated tree on one verifiable audit chain.
+
+### Added
+- **Handoff** — an agent transfers control to a named peer via a synthetic `transfer_to_<peer>`
+  tool; the canonical conversation carries across the switch, so **handoff works across providers**.
+- **Supervisor / router** — `supervisor(coordinator, [sub_agents], ...)`; a coordinator routes to
+  sub-agents by handoff. `run([entry, *peers], input)` is the handoff-team shortcut.
+- **Sequential & parallel** — `sequential([...])` pipes each agent's output into the next;
+  `parallel([...])` / `parallel_async([...])` fan out over the same input (`{agent: output}`).
+- **Nested trace correlation** — one parent `run_id`; each agent segment runs under a child trace
+  id (`{run_id}:{agent}#i`), so every `Step` carries its agent name and a `trace_id` that starts
+  with the parent — one correlated tree.
+- **Per-agent governance** — each segment is wrapped in `track(agent=…)` (spend attribution) and,
+  when the agent sets `max_usd`, a per-agent `budget(...)`; each segment opens its own audit
+  `decision()` on a shared `AuditLog` — one verifiable chain, distinct agents distinguishable.
+- **Session persistence** — `Session.save(path)` / `Session.load(path)` (local JSON), resumable.
+- **Refactor** — the per-agent loop is extracted (`run_agent_sync`/`run_agent_async`) so the
+  single-agent `Runner` and the orchestrator share exactly one loop.
+- **Docs/examples**: `docs/multi-agent.md`; `examples/handoff.py`, `examples/supervisor.py`.
+- **Tests**: supervisor + 2 sub-agents with a correlated audit trail; per-agent budgets enforced;
+  handoff across OpenAI↔Anthropic; sequential/parallel pipelines; session persistence.
+
 ## [0.1.0] — Phase 1: Governed single agent
 
 The wedge lands: a governed single agent runs on OpenAI **and** Anthropic, with budgets, audit,

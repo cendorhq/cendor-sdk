@@ -38,12 +38,20 @@ from ._governance import guard
 # --- the SDK -----------------------------------------------------------------------------------
 from .agent import Agent
 from .memory import Session
+from .orchestration import (
+    Handoff,
+    handoff,
+    parallel,
+    parallel_async,
+    sequential,
+    supervisor,
+)
 from .providers import ParsedResponse, ToolInvocation
 from .result import Result, Run, Step
 from .runner import Runner, run
 from .tools import Tool, tool
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # agent + loop
@@ -53,6 +61,13 @@ __all__ = [
     "run",
     "Runner",
     "Session",
+    # orchestration (Phase 2)
+    "handoff",
+    "Handoff",
+    "sequential",
+    "parallel",
+    "parallel_async",
+    "supervisor",
     # result model
     "Result",
     "Run",

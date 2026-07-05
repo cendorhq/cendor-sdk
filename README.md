@@ -2,7 +2,7 @@
 
 **A governed agent in 10 lines — cost budgets, tamper-evident audit, and PII redaction built in.**
 
-![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: phase 1](https://img.shields.io/badge/status-phase_1-orange)
+![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: phase 2](https://img.shields.io/badge/status-phase_2-yellow)
 
 *provider-agnostic · local-first · offline by default · sync **and** async*
 
@@ -101,12 +101,31 @@ its context.
 5. **Execute** any tool calls (each emits a `ToolCall`, same `trace_id`); append results; loop.
 6. Else **finalize** → structured-output parse → `Result`.
 
+## Multi-agent, one correlated tree
+
+Handoff, supervisor/router, and sequential/parallel pipelines — with the correlation that was
+*impossible beneath frameworks*. A whole multi-agent run is one governed, `trace_id`-correlated
+tree, on one verifiable audit chain. Handoff even works **across providers**:
+
+```python
+from cendor.sdk import Agent, run
+
+writer  = Agent(name="writer",  model="claude-opus-4-8", instructions="Write the brief.")
+planner = Agent(name="planner", model="gpt-4o", instructions="Plan, then hand off.",
+                handoffs=["writer"])
+
+result = run([planner, writer], "Research X and write a brief")   # OpenAI ➝ Anthropic handoff
+print(result.agents)     # ["planner", "writer"]
+```
+
+See [docs/multi-agent.md](docs/multi-agent.md).
+
 ## Status
 
 | Phase | Scope | State |
 |---|---|---|
 | **1** | Governed single agent (loop, providers, tools, structured output, session, governance) | ✅ shipped |
-| 2 | Multi-agent orchestration (handoff, supervisor, sequential/parallel) | ⏳ |
+| **2** | Multi-agent orchestration (handoff, supervisor, sequential/parallel) | ✅ shipped |
 | 3 | Ecosystem & interop (MCP, A2A, Foundry, OTel span tree, HITL) | ⏳ |
 | 4 | Production hardening & governed eval | ⏳ |
 
@@ -114,6 +133,7 @@ its context.
 
 - [docs/index.md](docs/index.md) — start here
 - [docs/sdk.md](docs/sdk.md) — the SDK quickstart & reference
+- [docs/multi-agent.md](docs/multi-agent.md) — handoff, supervisor, sequential/parallel
 - [CHANGELOG.md](CHANGELOG.md)
 - [examples/](examples/) — runnable, network-free examples
 - [plan/CENDOR_SDK_PLAN.md](plan/CENDOR_SDK_PLAN.md) — the full design
