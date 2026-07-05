@@ -6,6 +6,29 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — Phase 3: Ecosystem & interop
+
+Governed `cendor-sdk` agents become first-class citizens elsewhere — all optional and local-first.
+
+### Added
+- **MCP client** (`[mcp]` extra) — `load_mcp_tools(session)` turns an MCP server's tools into
+  governed `Tool`s (duck-typed against `mcp.ClientSession`; async, use with `run.aio`).
+  `load_mcp_resources(session)` reads resources.
+- **A2A** — `A2AServer` serves an agent over the Agent-to-Agent protocol (JSON-RPC `message/send` +
+  agent card); `A2AClient` calls it **in-process**; `a2a.serve(...)` is an optional stdlib HTTP
+  server. Replies carry governance metadata (trace id, cost).
+- **Foundry / Copilot** — `FoundryAdapter` publishes an agent as a Microsoft 365 / Foundry
+  custom-engine agent over the Bot Framework Activity protocol (`on_activity`, `manifest`).
+- **OpenTelemetry span tree** (`[otel]` extra) — `span_tree(result)` emits a `gen_ai.*` span tree
+  (root `agent.run` → per-agent → per model call / tool) mirroring the correlated `Result`; a
+  no-op when OTel isn't installed.
+- **Human-in-the-loop** — `require_approval(tool, approver=…)` gates a tool behind approval and
+  records the verdict via `decision.human_oversight(...)` on the run's audit chain; rejection blocks
+  the tool. The runner now exposes the active audit `decision` via a contextvar for this wiring.
+- **Docs/examples**: `docs/interop.md`; `examples/mcp_agent.py`.
+- **Tests** (+7): MCP round-trip (mocked session), A2A serve+call (in-proc), Foundry adapter, OTel
+  span-tree assertions (in-memory exporter), HITL approval + rejection recorded in a verified chain.
+
 ## [0.2.0] — Phase 2: Multi-agent orchestration
 
 Orchestration patterns land, with the correlation that was impossible beneath frameworks: a whole

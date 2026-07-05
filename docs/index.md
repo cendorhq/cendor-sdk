@@ -18,7 +18,7 @@ moving between them is continuous, never a migration.
 |---|---|
 | [sdk.md](sdk.md) | Quickstart, the agent loop, tools, structured output, sessions, governance, testing. |
 | [multi-agent.md](multi-agent.md) | Handoff, supervisor/router, sequential & parallel pipelines. |
-| _interop.md_ | MCP tools, A2A, Foundry/Copilot, OTel span tree, human-in-the-loop. _(Phase 3)_ |
+| [interop.md](interop.md) | MCP tools, A2A, Foundry/Copilot, OTel span tree, human-in-the-loop. |
 | _hardening.md_ | Retries, timeouts, checkpointed/resumable runs, durable memory. _(Phase 4)_ |
 | _eval.md_ | Cassette-backed governed eval & regression harness. _(Phase 4)_ |
 
