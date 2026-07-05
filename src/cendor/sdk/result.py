@@ -1,0 +1,125 @@
+"""The Run/Step/Result data model (plan §5).
+
+A ``Step`` wraps the actual ``LLMCall``/``ToolCall`` that ``cendor-core`` already emitted on the
+bus — the SDK does not re-invent these records, it just *correlates* them (by ``trace_id``) and
+returns them. ``Result`` (aliased ``Run``) is what ``run()`` hands back: the final output, the
+ordered steps, and aggregate usage + Decimal cost.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from cendor.core.types import LLMCall, Money, ToolCall, Usage
+
+
+@dataclass
+class Step:
+    """One correlated turn of a run: a single ``LLMCall`` (a model turn) or ``ToolCall`` (a tool
+    execution). ``.call`` is the real bus event; ``.agent`` names the agent that produced it."""
+
+    agent: str
+    kind: str  # "llm" | "tool"
+    call: LLMCall | ToolCall
+
+    @property
+    def name(self) -> str:
+        """The model id for an LLM step, or the tool name for a tool step."""
+        if isinstance(self.call, LLMCall):
+            return self.call.model
+        return self.call.name
+
+    @property
+    def trace_id(self) -> str:
+        """The correlation id this step shares with every other step in its run."""
+        return self.call.trace_id
+
+    @property
+    def usage(self) -> Usage | None:
+        return self.call.usage if isinstance(self.call, LLMCall) else None
+
+    @property
+    def cost(self) -> Money | None:
+        return self.call.cost if isinstance(self.call, LLMCall) else None
+
+
+@dataclass
+class Result:
+    """The result of a run. ``run()`` returns this; ``Run`` is an alias for it (plan §5)."""
+
+    output: Any
+    """The final answer (a string) or the parsed structured object when ``output_type`` was set."""
+
+    steps: list[Step] = field(default_factory=list)
+    """Every ``LLMCall``/``ToolCall`` of the run, in order, correlated by one ``trace_id``."""
+
+    trace_id: str = ""
+    """The run id every step shares (set via ``cendor.core.trace``)."""
+
+    agents: list[str] = field(default_factory=list)
+    """The agents that participated, in first-seen order (one, for a single-agent run)."""
+
+    messages: list[dict] = field(default_factory=list)
+    """The full conversation (canonical / OpenAI-shape messages), including tool results."""
+
+    # --- convenience views ---------------------------------------------------------------------
+
+    @property
+    def llm_steps(self) -> list[Step]:
+        """The model turns."""
+        return [s for s in self.steps if s.kind == "llm"]
+
+    @property
+    def tool_steps(self) -> list[Step]:
+        """The tool executions."""
+        return [s for s in self.steps if s.kind == "tool"]
+
+    @property
+    def final_message(self) -> dict | None:
+        """The last assistant message, or ``None`` if the run produced none."""
+        for m in reversed(self.messages):
+            if m.get("role") == "assistant":
+                return m
+        return None
+
+    @property
+    def usage(self) -> Usage:
+        """Aggregate token usage across every model turn of the run."""
+        inp = out = cached = reasoning = cache_write = 0
+        for s in self.llm_steps:
+            u = s.usage
+            if u is None:
+                continue
+            inp += u.input_tokens
+            out += u.output_tokens
+            cached += u.cached_tokens
+            reasoning += u.reasoning_tokens
+            cache_write += u.cache_write
+        return Usage(
+            input_tokens=inp,
+            output_tokens=out,
+            cached_tokens=cached,
+            reasoning_tokens=reasoning,
+            cache_write=cache_write,
+        )
+
+    @property
+    def cost(self) -> Money:
+        """Aggregate cost across the run (priced model turns only; unpriced turns contribute 0)."""
+        total = Money.zero()
+        for s in self.llm_steps:
+            if s.cost is not None:
+                total = total + s.cost
+        return total
+
+    def __repr__(self) -> str:  # concise, useful in test output
+        return (
+            f"Result(output={self.output!r}, steps={len(self.steps)}, "
+            f"cost={self.cost}, trace_id={self.trace_id!r})"
+        )
+
+
+# The plan's data model names the run record ``Run`` (id == trace_id, agents, steps, output, usage,
+# cost). ``Result`` carries exactly that shape; expose both names.
+Run = Result
