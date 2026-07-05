@@ -38,10 +38,12 @@ from ._governance import guard
 # --- the SDK -----------------------------------------------------------------------------------
 from .a2a import A2AClient, A2AServer
 from .agent import Agent
+from .checkpoint import Checkpointer
+from .eval import EvalCase, EvalReport, EvalResult, evaluate
 from .foundry import FoundryAdapter
 from .hitl import require_approval
 from .mcp import load_mcp_tools
-from .memory import Session
+from .memory import Session, SQLiteSessionStore
 from .orchestration import (
     Handoff,
     handoff,
@@ -52,11 +54,12 @@ from .orchestration import (
 )
 from .otel import span_tree
 from .providers import ParsedResponse, ToolInvocation
+from .resilience import RetryPolicy
 from .result import Result, Run, Step
 from .runner import Runner, run
 from .tools import Tool, tool
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # agent + loop
@@ -80,6 +83,14 @@ __all__ = [
     "FoundryAdapter",
     "span_tree",
     "require_approval",
+    # hardening + eval (Phase 4)
+    "RetryPolicy",
+    "Checkpointer",
+    "SQLiteSessionStore",
+    "evaluate",
+    "EvalCase",
+    "EvalReport",
+    "EvalResult",
     # result model
     "Result",
     "Run",
