@@ -70,12 +70,12 @@ packages = ["src/cendor"]     # contributes cendor/sdk ONLY — NEVER add src/ce
 # against a local core without publishing every change. A RELEASED build drops this table and the
 # loose PyPI ranges above take effect. This is dev-only and never ships in the wheel.
 [tool.uv.sources]
-cendor-core = { path = "../Cendor/packages/cendor-core", editable = true }
-cendor-tokenguard = { path = "../Cendor/packages/cendor-tokenguard", editable = true }
-cendor-acttrace = { path = "../Cendor/packages/cendor-acttrace", editable = true }
-cendor-contextkit = { path = "../Cendor/packages/cendor-contextkit", editable = true }
-cendor-squeeze = { path = "../Cendor/packages/cendor-squeeze", editable = true }
-cendor-cassette = { path = "../Cendor/packages/cendor-cassette", editable = true }
+cendor-core = { path = "../cendor-libs/packages/cendor-core", editable = true }
+cendor-tokenguard = { path = "../cendor-libs/packages/cendor-tokenguard", editable = true }
+cendor-acttrace = { path = "../cendor-libs/packages/cendor-acttrace", editable = true }
+cendor-contextkit = { path = "../cendor-libs/packages/cendor-contextkit", editable = true }
+cendor-squeeze = { path = "../cendor-libs/packages/cendor-squeeze", editable = true }
+cendor-cassette = { path = "../cendor-libs/packages/cendor-cassette", editable = true }
 
 [dependency-groups]
 dev = [

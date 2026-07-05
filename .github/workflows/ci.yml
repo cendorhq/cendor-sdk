@@ -22,8 +22,8 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
-          repository: cendorhq/Cendor
-          path: Cendor           # the dev source override in pyproject resolves ../Cendor/packages/*
+          repository: cendorhq/cendor-libs
+          path: cendor-libs      # the dev source override in pyproject resolves ../cendor-libs/packages/*
       - uses: actions/checkout@v5
         with:
           path: cendor-sdk

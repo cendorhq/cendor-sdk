@@ -40,7 +40,7 @@ Foundry Local). See [CHANGELOG.md](CHANGELOG.md).
 
 This repo ships **`cendor.sdk` only** (a PEP 420 namespace package — there is never a top-level
 `src/cendor/__init__.py`). It consumes the published Cendor libraries; for local iteration, a dev
-source override in `pyproject.toml` resolves them from a sibling `../Cendor` monorepo checkout.
+source override in `pyproject.toml` resolves them from a sibling `../cendor-libs` monorepo checkout.
 
 ```bash
 uv sync                        # install (with the dev source override)
