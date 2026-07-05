@@ -1,0 +1,4 @@
+# Normalize line endings: store LF in git; check out LF everywhere (ruff/CI stay consistent).
+* text=auto eol=lf
+*.png binary
+*.jpg binary
