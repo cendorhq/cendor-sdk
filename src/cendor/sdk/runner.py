@@ -14,6 +14,7 @@ import inspect
 import json
 import uuid
 from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import is_dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -26,6 +27,11 @@ from .result import Result, Step
 if TYPE_CHECKING:
     from .agent import Agent
     from .memory import Session
+
+#: The acttrace ``Decision`` handle for the run currently executing in this context (or ``None``).
+#: Human-in-the-loop tools (``cendor.sdk.hitl``) read it to record ``human_oversight`` on the same
+#: audit chain and decision the run is already correlated by. Set by :func:`_decision`.
+_active_decision: ContextVar[Any] = ContextVar("cendor_sdk_active_decision", default=None)
 
 
 # --------------------------------------------------------------------------- helpers
@@ -58,11 +64,15 @@ def _decision(audit: Any, agent: Agent, input: Any, run_id: str) -> Any:
         yield None
         return
     with audit.decision(input=_safe_input(input), actor=agent.name) as d:
+        token = _active_decision.set(d)
         try:
             d.record(agent=agent.name, model=agent.model, trace_id=run_id)
         except Exception:  # noqa: BLE001 - recording is best-effort; never break a run
             pass
-        yield d
+        try:
+            yield d
+        finally:
+            _active_decision.reset(token)
 
 
 def _safe_input(input: Any) -> Any:

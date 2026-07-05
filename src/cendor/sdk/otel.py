@@ -1,0 +1,77 @@
+"""Full-run OpenTelemetry span tree for a completed run (plan §7 Phase 3).
+
+Emits a ``gen_ai.*`` span tree so a whole agent trajectory shows up in Foundry / Datadog / etc.:
+a root ``agent.run`` span, a child span per agent segment, and a grandchild per model call
+(``chat {model}``) and tool execution (``execute_tool {name}``) — mirroring the correlated
+``Result`` tree. Uses the OpenTelemetry API directly (behind the ``[otel]`` extra); a **no-op
+returning ``False``** if OpenTelemetry isn't installed (local-first — telemetry is always optional).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from cendor.core.types import LLMCall
+
+from .result import Result, Step
+
+
+def _group_by_agent(steps: list[Step]) -> list[tuple[str, list[Step]]]:
+    """Contiguous groups of steps by agent, preserving order."""
+    groups: list[tuple[str, list[Step]]] = []
+    for step in steps:
+        if groups and groups[-1][0] == step.agent:
+            groups[-1][1].append(step)
+        else:
+            groups.append((step.agent, [step]))
+    return groups
+
+
+def span_tree(result: Result, tracer: Any = None) -> bool:
+    """Emit a ``gen_ai`` span tree for ``result``. ``True`` if emitted, ``False`` if OTel absent.
+
+    ```python
+    from cendor.sdk import run
+    from cendor.sdk.otel import span_tree
+    result = run(agent, "...")
+    span_tree(result)   # -> spans exported to your configured OTel pipeline
+    ```
+    """
+    try:
+        from opentelemetry import trace as ot
+    except ImportError:
+        return False
+
+    tracer = tracer or ot.get_tracer("cendor.sdk")
+    with tracer.start_as_current_span("agent.run") as root:
+        root.set_attribute("gen_ai.operation.name", "agent")
+        root.set_attribute("cendor.run.id", result.trace_id)
+        root.set_attribute("cendor.run.agents", ",".join(result.agents))
+        root.set_attribute("gen_ai.usage.input_tokens", result.usage.input_tokens)
+        root.set_attribute("gen_ai.usage.output_tokens", result.usage.output_tokens)
+        root.set_attribute("cendor.run.cost_usd", str(result.cost.amount))
+
+        for agent_name, group in _group_by_agent(result.steps):
+            with tracer.start_as_current_span(f"agent {agent_name}") as agent_span:
+                agent_span.set_attribute("gen_ai.operation.name", "invoke_agent")
+                agent_span.set_attribute("gen_ai.agent.name", agent_name)
+                for step in group:
+                    if step.kind == "llm" and isinstance(step.call, LLMCall):
+                        with tracer.start_as_current_span(f"chat {step.name}") as s:
+                            s.set_attribute("gen_ai.operation.name", "chat")
+                            s.set_attribute("gen_ai.system", step.call.provider)
+                            s.set_attribute("gen_ai.request.model", step.call.model)
+                            if step.usage is not None:
+                                s.set_attribute(
+                                    "gen_ai.usage.input_tokens", step.usage.input_tokens
+                                )
+                                s.set_attribute(
+                                    "gen_ai.usage.output_tokens", step.usage.output_tokens
+                                )
+                            if step.cost is not None:
+                                s.set_attribute("gen_ai.usage.cost", str(step.cost.amount))
+                    else:
+                        with tracer.start_as_current_span(f"execute_tool {step.name}") as s:
+                            s.set_attribute("gen_ai.operation.name", "execute_tool")
+                            s.set_attribute("gen_ai.tool.name", step.name)
+    return True

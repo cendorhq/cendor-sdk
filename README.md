@@ -2,7 +2,7 @@
 
 **A governed agent in 10 lines — cost budgets, tamper-evident audit, and PII redaction built in.**
 
-![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: phase 2](https://img.shields.io/badge/status-phase_2-yellow)
+![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![status: phase 3](https://img.shields.io/badge/status-phase_3-yellowgreen)
 
 *provider-agnostic · local-first · offline by default · sync **and** async*
 
@@ -126,7 +126,7 @@ See [docs/multi-agent.md](docs/multi-agent.md).
 |---|---|---|
 | **1** | Governed single agent (loop, providers, tools, structured output, session, governance) | ✅ shipped |
 | **2** | Multi-agent orchestration (handoff, supervisor, sequential/parallel) | ✅ shipped |
-| 3 | Ecosystem & interop (MCP, A2A, Foundry, OTel span tree, HITL) | ⏳ |
+| **3** | Ecosystem & interop (MCP, A2A, Foundry, OTel span tree, HITL) | ✅ shipped |
 | 4 | Production hardening & governed eval | ⏳ |
 
 ## Docs
@@ -134,6 +134,7 @@ See [docs/multi-agent.md](docs/multi-agent.md).
 - [docs/index.md](docs/index.md) — start here
 - [docs/sdk.md](docs/sdk.md) — the SDK quickstart & reference
 - [docs/multi-agent.md](docs/multi-agent.md) — handoff, supervisor, sequential/parallel
+- [docs/interop.md](docs/interop.md) — MCP, A2A, Foundry/Copilot, OTel, human-in-the-loop
 - [CHANGELOG.md](CHANGELOG.md)
 - [examples/](examples/) — runnable, network-free examples
 - [plan/CENDOR_SDK_PLAN.md](plan/CENDOR_SDK_PLAN.md) — the full design
