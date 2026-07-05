@@ -8,6 +8,7 @@ regressions in CI, offline. Seeds a possible future ``cendor-eval``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any
@@ -28,6 +29,11 @@ class EvalCase:
     expect_tools: list[str] | None = None
     max_usd: float | None = None
     max_tokens: int | None = None
+    #: A custom scorer for semantic / LLM-judge checks: ``judge(output, case) -> bool`` or
+    #: ``(bool, reason)``. Runs after the built-in checks; keeps grading pluggable (an LLM judge is
+    #: just another callable). Replay stays deterministic — a judge that itself calls a model should
+    #: be wrapped in its own cassette.
+    judge: Callable[[Any, EvalCase], bool | tuple[bool, str]] | None = None
 
 
 @dataclass
@@ -101,6 +107,11 @@ def _evaluate_one(agent: Agent, case: EvalCase) -> EvalResult:
         failures.append(f"cost ${cost} > ${case.max_usd} ceiling (regression)")
     if case.max_tokens is not None and tokens > case.max_tokens:
         failures.append(f"tokens {tokens} > {case.max_tokens} ceiling (regression)")
+    if case.judge is not None:
+        verdict = case.judge(result.output, case)
+        ok, reason = verdict if isinstance(verdict, tuple) else (verdict, "")
+        if not ok:
+            failures.append(f"judge rejected{': ' + reason if reason else ''}")
 
     return EvalResult(
         name=case.name,

@@ -61,6 +61,7 @@ def span_tree(result: Result, tracer: Any = None) -> bool:
                             s.set_attribute("gen_ai.operation.name", "chat")
                             s.set_attribute("gen_ai.system", step.call.provider)
                             s.set_attribute("gen_ai.request.model", step.call.model)
+                            _set_call_attrs(s, step.call)
                             if step.usage is not None:
                                 s.set_attribute(
                                     "gen_ai.usage.input_tokens", step.usage.input_tokens
@@ -68,10 +69,44 @@ def span_tree(result: Result, tracer: Any = None) -> bool:
                                 s.set_attribute(
                                     "gen_ai.usage.output_tokens", step.usage.output_tokens
                                 )
+                                if step.usage.reasoning_tokens:
+                                    s.set_attribute(
+                                        "gen_ai.usage.reasoning_tokens", step.usage.reasoning_tokens
+                                    )
                             if step.cost is not None:
                                 s.set_attribute("gen_ai.usage.cost", str(step.cost.amount))
                     else:
                         with tracer.start_as_current_span(f"execute_tool {step.name}") as s:
                             s.set_attribute("gen_ai.operation.name", "execute_tool")
                             s.set_attribute("gen_ai.tool.name", step.name)
+                            _set_tool_attrs(s, step.call)
     return True
+
+
+def _set_call_attrs(span: Any, call: Any) -> None:
+    """Enrich an LLM span with real latency, finish reason, and any recorded error."""
+    latency = getattr(call, "latency_ms", None)
+    if latency is not None:
+        span.set_attribute("gen_ai.latency_ms", latency)
+    meta = getattr(call, "metadata", {}) or {}
+    finish = meta.get("finish_reason") or getattr(call, "finish_reason", None)
+    if finish:
+        span.set_attribute("gen_ai.response.finish_reason", str(finish))
+    if meta.get("streamed"):
+        span.set_attribute("gen_ai.response.streamed", True)
+    err = meta.get("error")
+    if err:
+        span.set_attribute("error", True)
+        span.set_attribute("gen_ai.error", str(err))
+
+
+def _set_tool_attrs(span: Any, call: Any) -> None:
+    """Enrich a tool span with latency and argument names (values omitted — may be sensitive)."""
+    latency = getattr(call, "latency_ms", None)
+    if latency is not None:
+        span.set_attribute("gen_ai.latency_ms", latency)
+    args = getattr(call, "arguments", None)
+    if isinstance(args, dict):
+        inner = args.get("kwargs") if isinstance(args.get("kwargs"), dict) else args
+        if isinstance(inner, dict) and inner:
+            span.set_attribute("gen_ai.tool.arg_names", ",".join(sorted(map(str, inner))))

@@ -1,0 +1,50 @@
+name: release
+on:
+  push:
+    tags:
+      - 'v*.*.*'          # e.g. v1.0.0 — publishing is tag-triggered
+
+# PyPI **trusted publishing** (OIDC) — no stored API token. Configure a trusted publisher for the
+# `cendor-sdk` project on PyPI with:
+#   Owner: cendorhq · Repository: cendor-sdk · Workflow: release.yml · Environment: sdk
+# The GitHub OIDC identity of this workflow authenticates the upload; the (repo, workflow, env)
+# triple must match the publisher exactly.
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: sdk
+    permissions:
+      id-token: write      # OIDC trusted publishing
+      contents: write      # checkout (read) + create the GitHub Release (write)
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Assert tag version matches pyproject version
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          PYPROJECT="$(grep -m1 -E '^version[[:space:]]*=' pyproject.toml | sed -E 's/.*"([^"]+)".*/\1/')"
+          echo "tag=$VERSION  pyproject=$PYPROJECT"
+          if [ "$VERSION" != "$PYPROJECT" ]; then
+            echo "::error::tag $GITHUB_REF_NAME says v$VERSION but pyproject.toml is $PYPROJECT — fix one and re-tag"
+            exit 1
+          fi
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build       # backend-only (hatchling); ignores the dev [tool.uv.sources] override
+      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create GitHub Release (notes from CHANGELOG)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v hdr="## [$VERSION]" '
+            index($0, hdr)==1 {p=1; next}
+            p && index($0, "## [")==1 {exit}
+            p {print}
+          ' CHANGELOG.md > /tmp/notes.md
+          [ -s /tmp/notes.md ] || echo "cendor-sdk $VERSION" > /tmp/notes.md
+          gh release create "$GITHUB_REF_NAME" --title "cendor-sdk $VERSION" --notes-file /tmp/notes.md

@@ -22,3 +22,6 @@ htmlcov/
 audit.jsonl
 *.audit.jsonl
 checkpoints/
+
+# Planning docs — kept local, not tracked
+plan/

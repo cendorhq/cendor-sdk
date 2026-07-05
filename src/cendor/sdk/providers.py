@@ -7,8 +7,17 @@ one **canonical (OpenAI-shape)** format so a run can hand off between providers 
 history; each provider translates canonical → its wire format at call time.
 
 Normalization is implemented for OpenAI (Chat Completions + Responses), Anthropic, Gemini, Bedrock,
-and Ollama. Client construction ships for OpenAI + Anthropic (Phase 1); the others construct behind
-lazy imports via their extras.
+Ollama, Hugging Face, Azure AI Foundry (Chat Completions + Responses), and Foundry Local. Client
+construction ships for OpenAI + Anthropic (Phase 1); the others construct behind lazy imports via
+their extras.
+
+Hugging Face (``huggingface_hub``) and Azure AI Foundry both speak the OpenAI Chat Completions
+*shape*, so their providers subclass :class:`OpenAIChatProvider` and only override client
+construction. For Foundry this is deliberate and future-proof: Microsoft's current guidance is to
+consume Foundry deployments with the **standard** ``openai`` SDK pointed at the ``/openai/v1/``
+endpoint — the ``AzureOpenAI`` client and the ``azure-ai-inference`` package are being retired — so
+"connect to Foundry" is just the OpenAI provider with a Foundry ``base_url`` and the *deployment
+name* as the model id.
 """
 
 from __future__ import annotations
@@ -114,6 +123,107 @@ def _stringify(content: Any) -> str:
     return json.dumps(content, default=str)
 
 
+#: OpenAI reasoning-model families that reject a ``temperature`` param (calls 400 if it's sent).
+_NO_TEMPERATURE_PREFIXES: tuple[str, ...] = ("o1", "o3", "o4")
+
+
+def _openai_supports_temperature(model: str) -> bool:
+    """Whether an OpenAI model accepts ``temperature`` (o-series reasoning models reject it)."""
+    return not model.lower().startswith(_NO_TEMPERATURE_PREFIXES)
+
+
+def _json_instruction(output_schema: dict | None) -> str:
+    """A system-prompt nudge to emit JSON — carrying the schema when one is known (more reliable
+    than a bare 'respond with JSON', and the only structured-output lever on providers without a
+    native JSON-schema mode)."""
+    if output_schema:
+        return "\n\nRespond with ONLY a single JSON object matching this schema:\n" + json.dumps(
+            output_schema
+        )
+    return "\n\nRespond with only a single JSON object."
+
+
+# --------------------------------------------------------------------------- multimodal content
+#
+# The canonical content shape for multimodal input is OpenAI's content-parts list:
+#   [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "data:|https"}}]
+# OpenAI/Azure/Foundry-Local/HF pass this through unchanged; the translators below map it onto
+# Anthropic / Gemini blocks. (Bedrock keeps the text; image bytes are out of scope there for now.)
+
+
+def _part_text(part: Any) -> str | None:
+    if isinstance(part, dict) and part.get("type") == "text":
+        return str(part.get("text", ""))
+    return None
+
+
+def _image_url(part: Any) -> str | None:
+    if isinstance(part, dict) and part.get("type") == "image_url":
+        u = part.get("image_url")
+        return u.get("url") if isinstance(u, dict) else (u if isinstance(u, str) else None)
+    return None
+
+
+def _parse_data_url(url: str) -> tuple[str, str]:
+    """``data:image/png;base64,XXXX`` -> ``("image/png", "XXXX")``; best-effort."""
+    try:
+        header, data = url.split(",", 1)
+        media_type = header[len("data:") :].split(";", 1)[0] or "image/png"
+        return media_type, data
+    except ValueError:
+        return "image/png", ""
+
+
+def _text_of_content(content: Any) -> str:
+    """Join the text parts of a (possibly multimodal) content value; scalars pass through."""
+    if isinstance(content, list):
+        return "".join(t for p in content if (t := _part_text(p)) is not None)
+    return _stringify(content)
+
+
+def _anthropic_content(content: Any) -> Any:
+    """Canonical content -> Anthropic content (a string, or a list of text/image blocks)."""
+    if not isinstance(content, list):
+        return _stringify(content)
+    blocks: list[dict] = []
+    for p in content:
+        text = _part_text(p)
+        if text is not None:
+            blocks.append({"type": "text", "text": text})
+            continue
+        url = _image_url(p)
+        if url and url.startswith("data:"):
+            media_type, data = _parse_data_url(url)
+            blocks.append(
+                {
+                    "type": "image",
+                    "source": {"type": "base64", "media_type": media_type, "data": data},
+                }
+            )
+        elif url:
+            blocks.append({"type": "image", "source": {"type": "url", "url": url}})
+    return blocks or ""
+
+
+def _gemini_parts(content: Any) -> list[dict]:
+    """Canonical content -> Gemini ``parts`` (text + inline_data/file_data for images)."""
+    if not isinstance(content, list):
+        return [{"text": _stringify(content)}]
+    parts: list[dict] = []
+    for p in content:
+        text = _part_text(p)
+        if text is not None:
+            parts.append({"text": text})
+            continue
+        url = _image_url(p)
+        if url and url.startswith("data:"):
+            media_type, data = _parse_data_url(url)
+            parts.append({"inline_data": {"mime_type": media_type, "data": data}})
+        elif url:
+            parts.append({"file_data": {"file_uri": url}})
+    return parts or [{"text": ""}]
+
+
 # --------------------------------------------------------------------------- providers
 
 _client_cache: dict[tuple, Any] = {}
@@ -201,6 +311,7 @@ class Provider:
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         raise NotImplementedError
 
@@ -213,12 +324,25 @@ class Provider:
     def wants_more_tools(parsed: ParsedResponse) -> bool:
         return bool(parsed.tool_calls)
 
+    # --- streaming ------------------------------------------------------------------------------
+    #: Whether this provider reassembles a streamed response. False → the runner falls back to a
+    #: non-streamed call and yields the whole text as one delta (correct, just not incremental).
+    supports_stream: bool = False
+
+    def stream_text(self, chunk: Any) -> str:
+        """The text delta carried by one streamed chunk (``""`` if none)."""
+        return ""
+
+    def parse_stream(self, chunks: list) -> ParsedResponse:
+        """Reassemble a full :class:`ParsedResponse` (content + tool calls) from streamed chunks."""
+        raise NotImplementedError
+
 
 class OpenAIChatProvider(Provider):
     """OpenAI Chat Completions."""
 
     name = "openai"
-    _create_path = ("chat", "completions", "create")
+    _create_path: tuple[str, ...] = ("chat", "completions", "create")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         import openai
@@ -245,10 +369,11 @@ class OpenAIChatProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         wire: list[dict] = []
         sys = instructions
-        if json_mode:
+        if json_mode and not output_schema:  # native json_schema below is stronger than a nudge
             sys = (sys + "\n\nRespond with a single JSON object.").strip()
         if sys:
             wire.append({"role": "system", "content": sys})
@@ -258,8 +383,14 @@ class OpenAIChatProvider(Provider):
         if formatted:
             kwargs["tools"] = formatted
         if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
-        if temperature is not None:
+            if output_schema:  # schema-constrained output (more reliable than json_object)
+                kwargs["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {"name": "output", "schema": output_schema, "strict": False},
+                }
+            else:
+                kwargs["response_format"] = {"type": "json_object"}
+        if temperature is not None and _openai_supports_temperature(model):
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_tokens"] = max_tokens
@@ -284,6 +415,53 @@ class OpenAIChatProvider(Provider):
             tool_calls=tool_calls,
             finish_reason=_get(choice, "finish_reason"),
             raw=response,
+        )
+
+    supports_stream = True
+
+    def stream_text(self, chunk: Any) -> str:
+        choice = _first(_get(chunk, "choices"))
+        return str(_get(_get(choice, "delta"), "content", "") or "")
+
+    def parse_stream(self, chunks: list) -> ParsedResponse:
+        """Accumulate Chat Completions deltas: content is concatenated; tool calls are reassembled
+        per ``index`` (id/name captured, argument fragments joined)."""
+        content_parts: list[str] = []
+        acc: dict[int, dict[str, Any]] = {}
+        finish: str | None = None
+        for ch in chunks:
+            choice = _first(_get(ch, "choices"))
+            if choice is None:
+                continue
+            delta = _get(choice, "delta")
+            txt = _get(delta, "content")
+            if txt:
+                content_parts.append(str(txt))
+            for tc in _get(delta, "tool_calls") or []:
+                idx = _get(tc, "index", 0) or 0
+                slot = acc.setdefault(idx, {"id": None, "name": "", "args": ""})
+                if _get(tc, "id"):
+                    slot["id"] = _get(tc, "id")
+                fn = _get(tc, "function")
+                if _get(fn, "name"):
+                    slot["name"] = _get(fn, "name")
+                if _get(fn, "arguments"):
+                    slot["args"] += str(_get(fn, "arguments"))
+            if _get(choice, "finish_reason"):
+                finish = _get(choice, "finish_reason")
+        tool_calls = [
+            ToolInvocation(
+                id=slot["id"] or f"call_{uuid.uuid4().hex[:8]}",
+                name=slot["name"] or "",
+                arguments=_loads_args(slot["args"]),
+            )
+            for _, slot in sorted(acc.items())
+        ]
+        return ParsedResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish,
+            raw=chunks,
         )
 
 
@@ -318,14 +496,18 @@ class OpenAIResponsesProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         kwargs: dict[str, Any] = {"model": model, "input": list(messages)}
-        if instructions:
-            kwargs["instructions"] = instructions
+        sys = instructions
+        if json_mode:
+            sys = (sys + _json_instruction(output_schema)).strip()
+        if sys:
+            kwargs["instructions"] = sys
         formatted = self.format_tools(tools)
         if formatted:
             kwargs["tools"] = formatted
-        if temperature is not None:
+        if temperature is not None and _openai_supports_temperature(model):
             kwargs["temperature"] = temperature
         if max_tokens is not None:
             kwargs["max_output_tokens"] = max_tokens
@@ -396,10 +578,11 @@ class AnthropicProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         system = instructions
         if json_mode:
-            system = (system + "\n\nRespond with only a single JSON object.").strip()
+            system = (system + _json_instruction(output_schema)).strip()
         wire = _canonical_to_anthropic(messages)
         kwargs: dict[str, Any] = {
             "model": model,
@@ -479,9 +662,108 @@ def _canonical_to_anthropic(messages: list[dict]) -> list[dict]:
                     }
                 )
             out.append({"role": "assistant", "content": blocks if blocks else ""})
-        else:  # user / system-as-user fallback
-            out.append({"role": "user", "content": _stringify(m.get("content"))})
+        else:  # user / system-as-user fallback (supports multimodal content parts)
+            out.append({"role": "user", "content": _anthropic_content(m.get("content"))})
     flush_results()
+    return out
+
+
+def _canonical_to_gemini(messages: list[dict]) -> list[dict]:
+    """Translate canonical (OpenAI-shape) history to Gemini ``contents``.
+
+    Assistant tool calls become ``function_call`` parts; tool results become ``function_response``
+    parts folded into a following ``user`` turn (Gemini has no dedicated tool role). Without this,
+    a multi-turn tool conversation would lose its tool calls/results and the loop would stall.
+    """
+    out: list[dict] = []
+    pending: list[dict] = []
+
+    def flush() -> None:
+        if pending:
+            out.append({"role": "user", "parts": list(pending)})
+            pending.clear()
+
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            pending.append(
+                {
+                    "function_response": {
+                        "name": m.get("name", ""),
+                        "response": {"result": _stringify(m.get("content"))},
+                    }
+                }
+            )
+            continue
+        flush()
+        if role == "assistant":
+            parts: list[dict] = []
+            if m.get("content"):
+                parts.append({"text": _stringify(m["content"])})
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function", {})
+                parts.append(
+                    {
+                        "function_call": {
+                            "name": fn.get("name", ""),
+                            "args": _loads_args(fn.get("arguments")),
+                        }
+                    }
+                )
+            out.append({"role": "model", "parts": parts or [{"text": ""}]})
+        else:  # user / system-as-user fallback (supports multimodal content parts)
+            out.append({"role": "user", "parts": _gemini_parts(m.get("content"))})
+    flush()
+    return out
+
+
+def _canonical_to_bedrock(messages: list[dict]) -> list[dict]:
+    """Translate canonical (OpenAI-shape) history to Bedrock Converse ``messages``.
+
+    Assistant tool calls become ``toolUse`` blocks; tool results become ``toolResult`` blocks folded
+    into a following ``user`` turn (consecutive results merge). Without this, Converse loses the
+    tool exchange and the agent loop cannot complete on Bedrock.
+    """
+    out: list[dict] = []
+    pending: list[dict] = []
+
+    def flush() -> None:
+        if pending:
+            out.append({"role": "user", "content": list(pending)})
+            pending.clear()
+
+    for m in messages:
+        role = m.get("role")
+        if role == "tool":
+            pending.append(
+                {
+                    "toolResult": {
+                        "toolUseId": m.get("tool_call_id", ""),
+                        "content": [{"text": _stringify(m.get("content"))}],
+                    }
+                }
+            )
+            continue
+        flush()
+        if role == "assistant":
+            blocks: list[dict] = []
+            if m.get("content"):
+                blocks.append({"text": _stringify(m["content"])})
+            for tc in m.get("tool_calls") or []:
+                fn = tc.get("function", {})
+                blocks.append(
+                    {
+                        "toolUse": {
+                            "toolUseId": tc.get("id", ""),
+                            "name": fn.get("name", ""),
+                            "input": _loads_args(fn.get("arguments")),
+                        }
+                    }
+                )
+            out.append({"role": "assistant", "content": blocks or [{"text": ""}]})
+        else:  # user / system-as-user fallback (multimodal: text parts kept)
+            out.append({"role": "user", "content": [{"text": _text_of_content(m.get("content"))}]})
+    flush()
     return out
 
 
@@ -512,15 +794,9 @@ class GeminiProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
-        contents = [
-            {
-                "role": "model" if m.get("role") == "assistant" else "user",
-                "parts": [{"text": _stringify(m.get("content"))}],
-            }
-            for m in messages
-            if m.get("role") in ("user", "assistant")
-        ]
+        contents = _canonical_to_gemini(messages)
         config: dict[str, Any] = {}
         if instructions:
             config["system_instruction"] = instructions
@@ -531,6 +807,10 @@ class GeminiProvider(Provider):
         formatted = self.format_tools(tools)
         if formatted:
             config["tools"] = formatted
+        elif json_mode:  # Gemini can't combine function tools with a forced JSON schema
+            config["response_mime_type"] = "application/json"
+            if output_schema:
+                config["response_schema"] = output_schema
         kwargs: dict[str, Any] = {"model": model, "contents": contents}
         if config:
             kwargs["config"] = config
@@ -590,18 +870,15 @@ class BedrockProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
-        wire = [
-            {
-                "role": "assistant" if m.get("role") == "assistant" else "user",
-                "content": [{"text": _stringify(m.get("content"))}],
-            }
-            for m in messages
-            if m.get("role") in ("user", "assistant")
-        ]
+        wire = _canonical_to_bedrock(messages)
+        system_text = instructions
+        if json_mode:
+            system_text = (system_text + _json_instruction(output_schema)).strip()
         kwargs: dict[str, Any] = {"modelId": model, "messages": wire}
-        if instructions:
-            kwargs["system"] = [{"text": instructions}]
+        if system_text:
+            kwargs["system"] = [{"text": system_text}]
         formatted = self.format_tools(tools)
         if formatted:
             kwargs["toolConfig"] = formatted
@@ -663,6 +940,7 @@ class OllamaProvider(Provider):
         json_mode: bool = False,
         temperature: float | None = None,
         max_tokens: int | None = None,
+        output_schema: dict | None = None,
     ) -> dict:
         wire: list[dict] = []
         if instructions:
@@ -672,8 +950,8 @@ class OllamaProvider(Provider):
         formatted = self.format_tools(tools)
         if formatted:
             kwargs["tools"] = formatted
-        if json_mode:
-            kwargs["format"] = "json"
+        if json_mode:  # Ollama accepts a JSON schema (or "json") as the format constraint
+            kwargs["format"] = output_schema if output_schema else "json"
         return kwargs
 
     def parse(self, response: Any) -> ParsedResponse:
@@ -696,6 +974,203 @@ class OllamaProvider(Provider):
             raw=response,
         )
 
+    supports_stream = True
+
+    def stream_text(self, chunk: Any) -> str:
+        return str(_get(_get(chunk, "message"), "content", "") or "")
+
+    def parse_stream(self, chunks: list) -> ParsedResponse:
+        """Accumulate Ollama chat chunks: content deltas concatenated; tool calls arrive whole on
+        a chunk's ``message.tool_calls`` (usually the final one)."""
+        content_parts: list[str] = []
+        tool_calls: list[ToolInvocation] = []
+        finish: str | None = None
+        for ch in chunks:
+            message = _get(ch, "message")
+            txt = _get(message, "content")
+            if txt:
+                content_parts.append(str(txt))
+            for tc in _get(message, "tool_calls") or []:
+                fn = _get(tc, "function")
+                tool_calls.append(
+                    ToolInvocation(
+                        id=f"call_{uuid.uuid4().hex[:8]}",
+                        name=_get(fn, "name") or "",
+                        arguments=_loads_args(_get(fn, "arguments")),
+                    )
+                )
+            if _get(ch, "done_reason") or _get(ch, "done"):
+                finish = _get(ch, "done_reason") or "stop"
+        return ParsedResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish,
+            raw=chunks,
+        )
+
+
+class HuggingFaceProvider(OpenAIChatProvider):
+    """Hugging Face Inference (``huggingface_hub.InferenceClient``).
+
+    ``InferenceClient.chat_completion`` returns an OpenAI-shaped ``ChatCompletionOutput`` (choices /
+    message / tool_calls / usage), so this reuses :class:`OpenAIChatProvider`'s request formatting
+    and response parsing verbatim — only the client and the create path differ. ``cendor-core``
+    detects ``chat_completion`` structurally and attributes the ``LLMCall`` to ``huggingface``.
+
+    The ``model`` is a Hub model id (``"meta-llama/Llama-3.1-8B-Instruct"``) or an Inference
+    Endpoint URL. Point at a dedicated endpoint / third-party provider with ``base_url=``, and route
+    through a specific inference provider with the ``HF_PROVIDER`` env var (e.g. ``together``).
+    """
+
+    name = "huggingface"
+    _create_path: tuple[str, ...] = ("chat_completion",)
+
+    def _raw_client(self, async_: bool, config: dict) -> Any:
+        from huggingface_hub import AsyncInferenceClient, InferenceClient  # type: ignore
+
+        token = (
+            config.get("api_key")
+            or os.environ.get("HF_TOKEN")
+            or os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+        )
+        kwargs: dict[str, Any] = {"token": token}
+        if config.get("base_url"):
+            kwargs["base_url"] = config["base_url"]
+        provider = os.environ.get("HF_PROVIDER")
+        if provider:
+            kwargs["provider"] = provider
+        cls = AsyncInferenceClient if async_ else InferenceClient
+        return cls(**kwargs)
+
+
+def _azure_foundry_base_url(config: dict) -> str | None:
+    """Resolve (and normalize) the Azure AI Foundry OpenAI-v1 ``base_url``.
+
+    Accepts an explicit ``base_url`` or the ``AZURE_OPENAI_ENDPOINT`` / ``AZURE_OPENAI_BASE_URL`` /
+    ``AZURE_AI_ENDPOINT`` env vars — a bare Foundry host (``https://<res>.openai.azure.com`` or
+    ``https://<res>.services.ai.azure.com``) gets the ``/openai/v1/`` route appended. An endpoint
+    that already carries a path (``/openai/v1`` or the legacy ``/models``) is left as-is.
+    """
+    raw = (
+        config.get("base_url")
+        or os.environ.get("AZURE_OPENAI_BASE_URL")
+        or os.environ.get("AZURE_OPENAI_ENDPOINT")
+        or os.environ.get("AZURE_AI_ENDPOINT")
+    )
+    if not raw:
+        return None
+    raw = raw.rstrip("/")
+    if "/openai/v1" in raw or raw.endswith("/models"):
+        return raw + "/"
+    if raw.endswith((".openai.azure.com", ".services.ai.azure.com")) or (
+        ".cognitiveservices.azure.com" in raw
+    ):
+        return raw + "/openai/v1/"
+    return raw + "/"
+
+
+class AzureFoundryProvider(OpenAIChatProvider):
+    """Azure AI Foundry models via the OpenAI-compatible ``/openai/v1/`` endpoint.
+
+    Microsoft's current guidance (the ``AzureOpenAI`` client and ``azure-ai-inference`` are being
+    retired) is to consume Foundry deployments with the **standard** ``openai`` SDK pointed at the
+    Foundry v1 endpoint. So this is :class:`OpenAIChatProvider` with Foundry-aware construction:
+
+    * ``model`` is your Foundry **deployment name** (Azure keys on deployment, not model, name).
+    * ``base_url`` is the Foundry endpoint — either ``https://<res>.openai.azure.com`` (Azure OpenAI
+      models) or ``https://<res>.services.ai.azure.com`` (Foundry Models incl. DeepSeek, Grok,
+      Llama, …); ``/openai/v1/`` is appended for you. Also read from ``AZURE_OPENAI_ENDPOINT``.
+    * ``api_key`` is your resource key (``AZURE_OPENAI_API_KEY`` / ``AZURE_INFERENCE_CREDENTIAL``).
+      For Microsoft Entra ID, pass a bearer-token provider as ``api_key`` (the v1 client
+      refreshes it), or build the client yourself and pass ``client=`` on the Agent.
+
+    ``api-version`` is not needed — the v1 GA API infers it. Detected by ``cendor-core`` as OpenAI
+    (it *is* the ``openai`` SDK), so budgets/guard/audit ride the same seams.
+    """
+
+    name = "azure"
+
+    def _raw_client(self, async_: bool, config: dict) -> Any:
+        import openai
+
+        base_url = _azure_foundry_base_url(config)
+        api_key = (
+            config.get("api_key")
+            or os.environ.get("AZURE_OPENAI_API_KEY")
+            or os.environ.get("AZURE_INFERENCE_CREDENTIAL")
+            or os.environ.get("AZURE_AI_API_KEY")
+            or "azure-cendor-sdk-placeholder"
+        )
+        kwargs: dict[str, Any] = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        cls = openai.AsyncOpenAI if async_ else openai.OpenAI
+        return cls(**kwargs)
+
+
+class AzureFoundryResponsesProvider(OpenAIResponsesProvider):
+    """Azure AI Foundry via the OpenAI **Responses** API (``responses.create``).
+
+    Same Foundry-aware client construction as :class:`AzureFoundryProvider`, but drives the
+    Responses API instead of Chat Completions — the primary surface for OpenAI-family Foundry
+    deployments (``gpt-*``, ``o*``). Use ``provider="azure_responses"`` when your deployment is an
+    OpenAI model and you want Responses semantics; keep ``provider="azure"`` (Chat Completions) for
+    the broadest coverage across non-OpenAI Foundry models (DeepSeek, Grok, Llama, …).
+    """
+
+    name = "azure_responses"
+
+    def _raw_client(self, async_: bool, config: dict) -> Any:
+        return AzureFoundryProvider()._raw_client(async_, config)
+
+
+def _foundry_local_base_url(config: dict) -> str | None:
+    """Resolve (and normalize to ``/v1/``) the Foundry Local OpenAI-compatible endpoint.
+
+    Accepts an explicit ``base_url`` or the ``FOUNDRY_LOCAL_ENDPOINT`` env var — typically the
+    ``FoundryLocalManager(alias).endpoint`` of the running on-device service. A bare host gets
+    ``/v1/`` appended; an endpoint that already ends in ``/v1`` is preserved.
+    """
+    raw = config.get("base_url") or os.environ.get("FOUNDRY_LOCAL_ENDPOINT")
+    if not raw:
+        return None
+    raw = raw.rstrip("/")
+    return (raw + "/") if raw.endswith("/v1") else (raw + "/v1/")
+
+
+class FoundryLocalProvider(OpenAIChatProvider):
+    """Microsoft **Foundry Local** — on-device models over the local OpenAI-compatible REST server.
+
+    The local counterpart to Ollama: Foundry Local runs a model on the device and exposes an
+    OpenAI-compatible endpoint, so this is :class:`OpenAIChatProvider` pointed at that local URL. No
+    key is needed (``api_key`` defaults to ``"none"``). Two ways to supply the endpoint:
+
+    * Run the service yourself and pass ``base_url=`` (or set ``FOUNDRY_LOCAL_ENDPOINT``).
+    * Bootstrap it with ``foundry_local.FoundryLocalManager(alias)`` — its ``.endpoint`` /
+      ``.api_key`` and the resolved model id (``.get_model_info(alias).id``). For the fully managed
+      path, build that ``openai`` client and hand it to ``Agent(client=...)``.
+
+    ``model`` is the concrete Foundry Local model id (not the catalog alias). Detected by
+    ``cendor-core`` as OpenAI (it *is* an OpenAI-compatible endpoint), so governance rides the same
+    seams.
+    """
+
+    name = "foundry_local"
+
+    def _raw_client(self, async_: bool, config: dict) -> Any:
+        import openai
+
+        base_url = _foundry_local_base_url(config)
+        if not base_url:
+            raise ValueError(
+                "Foundry Local needs an endpoint: pass base_url=... on the Agent or set "
+                "FOUNDRY_LOCAL_ENDPOINT (e.g. foundry_local.FoundryLocalManager(alias).endpoint). "
+                "See docs/sdk.md → Connecting to Hugging Face & Azure AI Foundry."
+            )
+        api_key = config.get("api_key") or os.environ.get("FOUNDRY_LOCAL_API_KEY") or "none"
+        cls = openai.AsyncOpenAI if async_ else openai.OpenAI
+        return cls(api_key=api_key, base_url=base_url)
+
 
 # --------------------------------------------------------------------------- registry
 
@@ -707,6 +1182,15 @@ _PROVIDERS: dict[str, Provider] = {
     "gemini": GeminiProvider(),
     "bedrock": BedrockProvider(),
     "ollama": OllamaProvider(),
+    "huggingface": HuggingFaceProvider(),
+    "hf": HuggingFaceProvider(),
+    "azure": AzureFoundryProvider(),
+    "azure_openai": AzureFoundryProvider(),
+    "foundry": AzureFoundryProvider(),
+    "azure_responses": AzureFoundryResponsesProvider(),
+    "foundry_responses": AzureFoundryResponsesProvider(),
+    "foundry_local": FoundryLocalProvider(),
+    "foundry-local": FoundryLocalProvider(),
 }
 
 #: (prefix, provider-name) — first match wins; longer/more-specific prefixes first.

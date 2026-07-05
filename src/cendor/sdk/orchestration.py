@@ -101,6 +101,21 @@ def _user_message(value: Any) -> dict:
 # --------------------------------------------------------------------------- handoff / supervisor
 
 
+def _resume_state(ckpt: Any, agents: list[Agent], input: Any, session: Any) -> tuple:
+    """Resolve (parent, messages, active, seen, start_seg) from an unfinished checkpoint."""
+    registry = {a.name: a for a in agents}
+    state = ckpt.load() if ckpt else None
+    if state and not state.get("done"):
+        return (
+            state.get("run_id") or uuid.uuid4().hex,
+            list(state.get("messages") or []),
+            registry.get(state.get("active"), agents[0]),
+            list(state.get("seen") or []),
+            int(state.get("seg", 0)),
+        )
+    return uuid.uuid4().hex, _prepare_messages(agents[0], input, session), agents[0], [], 0
+
+
 def run_agents(
     agents: list[Agent],
     input: Any,
@@ -108,26 +123,45 @@ def run_agents(
     audit: Any = None,
     max_turns: int | None = None,
     session: Any = None,
+    checkpoint: Any = None,
 ) -> Result:
     """Run a handoff/supervised team: ``agents[0]`` is the entry; peers are reached by handoff.
 
     Control transfers when an agent calls a ``transfer_to_<peer>`` tool; the conversation (canonical
     provider-agnostic history) carries across the switch — so handoff works *across providers*.
+    ``checkpoint`` (a path or ``Checkpointer``) persists the trajectory after each turn/segment so a
+    crashed multi-agent run resumes without re-doing completed work.
     """
+    from .checkpoint import _as_checkpointer
+
+    ckpt = _as_checkpointer(checkpoint)
     registry = {a.name: a for a in agents}
-    parent = uuid.uuid4().hex
-    messages = _prepare_messages(agents[0], input, session)
-    active = agents[0]
+    parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
-    seen: list[str] = []
     output: Any = None
     max_segments = 2 * len(registry) + 2
+    seg = start_seg
 
-    for seg in range(max_segments):
+    def _save(done: bool, seg_no: int, active_name: str, out: Any = None) -> None:
+        if ckpt is not None:
+            ckpt.save(
+                {
+                    "run_id": parent,
+                    "messages": messages,
+                    "active": active_name,
+                    "seen": seen,
+                    "seg": seg_no,
+                    "done": done,
+                    "output": out,
+                }
+            )
+
+    for seg in range(start_seg, max_segments):
         if active.name not in seen:
             seen.append(active.name)
         child = f"{parent}:{active.name}#{seg}"
         tools, tool_map, transfer_map = _effective(active, registry)
+        on_turn = (lambda _m, _s=seg, _a=active.name: _save(False, _s, _a)) if ckpt else None
         with _scope(active):
             output, seg_steps, switched = run_agent_sync(
                 active,
@@ -138,21 +172,25 @@ def run_agents(
                 tools=tools,
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
+                on_turn=on_turn,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
             active = registry[switched]
+            _save(False, seg + 1, active.name)
             continue
         break
 
     if session is not None:
         session.replace(messages)
+    _save(True, seg, active.name, output)
     return Result(
         output=_parse_output(output, active.output_type),
         steps=steps,
         trace_id=parent,
         agents=seen,
         messages=messages,
+        incomplete=output is None,
     )
 
 
@@ -163,22 +201,39 @@ async def run_agents_async(
     audit: Any = None,
     max_turns: int | None = None,
     session: Any = None,
+    checkpoint: Any = None,
 ) -> Result:
-    """Async counterpart of :func:`run_agents`."""
+    """Async counterpart of :func:`run_agents` (same segment/turn checkpointing)."""
+    from .checkpoint import _as_checkpointer
+
+    ckpt = _as_checkpointer(checkpoint)
     registry = {a.name: a for a in agents}
-    parent = uuid.uuid4().hex
-    messages = _prepare_messages(agents[0], input, session)
-    active = agents[0]
+    parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
-    seen: list[str] = []
     output: Any = None
     max_segments = 2 * len(registry) + 2
+    seg = start_seg
 
-    for seg in range(max_segments):
+    def _save(done: bool, seg_no: int, active_name: str, out: Any = None) -> None:
+        if ckpt is not None:
+            ckpt.save(
+                {
+                    "run_id": parent,
+                    "messages": messages,
+                    "active": active_name,
+                    "seen": seen,
+                    "seg": seg_no,
+                    "done": done,
+                    "output": out,
+                }
+            )
+
+    for seg in range(start_seg, max_segments):
         if active.name not in seen:
             seen.append(active.name)
         child = f"{parent}:{active.name}#{seg}"
         tools, tool_map, transfer_map = _effective(active, registry)
+        on_turn = (lambda _m, _s=seg, _a=active.name: _save(False, _s, _a)) if ckpt else None
         with _scope(active):
             output, seg_steps, switched = await run_agent_async(
                 active,
@@ -189,21 +244,25 @@ async def run_agents_async(
                 tools=tools,
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
+                on_turn=on_turn,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
             active = registry[switched]
+            _save(False, seg + 1, active.name)
             continue
         break
 
     if session is not None:
         session.replace(messages)
+    _save(True, seg, active.name, output)
     return Result(
         output=_parse_output(output, active.output_type),
         steps=steps,
         trace_id=parent,
         agents=seen,
         messages=messages,
+        incomplete=output is None,
     )
 
 
