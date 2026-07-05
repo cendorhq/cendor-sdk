@@ -28,6 +28,10 @@ class Agent:
         max_turns: Upper bound on ReAct iterations (loop-termination guarantee).
         context_budget: If set, assemble the history to this token budget via ``contextkit``.
         temperature / max_tokens: Optional generation controls.
+        cache: Opt into explicit provider prompt caching. For Anthropic this puts a
+            ``cache_control`` breakpoint on the system prompt + tool schema (the stable prefix), so
+            repeated runs pay the cached rate; cache reads/writes come back as usage and are priced
+            by ``cendor-core``. A no-op where caching is automatic (OpenAI) or unsupported.
         extra: Extra provider request kwargs merged into every model call — the passthrough for
             things the SDK doesn't model first-class (``tool_choice``, ``reasoning_effort``,
             ``top_p``, ``stop``, ``seed``, ``response_format``, ``extra_body``, …). Merged at the
@@ -49,6 +53,7 @@ class Agent:
     context_budget: int | None = None
     temperature: float | None = None
     max_tokens: int | None = None
+    cache: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
     retriever: Any = None  # Callable[[str], list[str]] — injected as context when set (RAG)
     handoffs: list[Any] = field(default_factory=list)
