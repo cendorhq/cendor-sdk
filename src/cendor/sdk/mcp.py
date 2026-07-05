@@ -73,6 +73,46 @@ async def load_mcp_tools(session: Any) -> list[Tool]:
     return [_wrap_mcp_tool(session, spec) for spec in specs]
 
 
+async def load_mcp_prompts(session: Any) -> dict[str, Any]:
+    """List an MCP session's prompt templates as ``{name: {description, arguments}}`` (empty if the
+    server exposes none). Fetch a rendered prompt with :func:`get_mcp_prompt`."""
+    if not hasattr(session, "list_prompts"):
+        return {}
+    listing = await session.list_prompts()
+    prompts = _get(listing, "prompts") or (listing if isinstance(listing, list) else [])
+    out: dict[str, Any] = {}
+    for p in prompts:
+        name = _get(p, "name")
+        if name is None:
+            continue
+        out[str(name)] = {
+            "description": _get(p, "description") or "",
+            "arguments": _get(p, "arguments") or [],
+        }
+    return out
+
+
+async def get_mcp_prompt(session: Any, name: str, arguments: dict | None = None) -> list[dict]:
+    """Render an MCP prompt to canonical (OpenAI-shape) messages you can pass straight to ``run``.
+
+    Maps each MCP prompt message to ``{"role", "content"}`` (roles other than ``assistant`` become
+    ``user``). Returns ``[]`` if the server has no ``get_prompt``.
+    """
+    if not hasattr(session, "get_prompt"):
+        return []
+    result = await session.get_prompt(name, arguments or {})
+    out: list[dict] = []
+    for m in _get(result, "messages") or []:
+        role = _get(m, "role") or "user"
+        out.append(
+            {
+                "role": "assistant" if role == "assistant" else "user",
+                "content": _mcp_result_text(_get(m, "content")),
+            }
+        )
+    return out
+
+
 async def load_mcp_resources(session: Any) -> dict[str, Any]:
     """Read an MCP session's resources into ``{uri: contents}`` (best-effort; empty if absent)."""
     if not hasattr(session, "list_resources"):

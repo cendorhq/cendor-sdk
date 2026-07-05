@@ -31,7 +31,7 @@ from cendor.acttrace import AuditLog, Policy, verify
 from cendor.core import current_trace_id, trace
 
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
-from cendor.tokenguard import BudgetExceeded, budget, report, track
+from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
 
 from ._governance import guard
 
@@ -39,11 +39,12 @@ from ._governance import guard
 from .a2a import A2AClient, A2AServer
 from .agent import Agent
 from .checkpoint import Checkpointer
+from .embeddings import aembed, embed
 from .eval import EvalCase, EvalReport, EvalResult, evaluate
 from .foundry import FoundryAdapter
 from .hitl import require_approval
-from .mcp import load_mcp_tools
-from .memory import Session, SQLiteSessionStore
+from .mcp import get_mcp_prompt, load_mcp_prompts, load_mcp_resources, load_mcp_tools
+from .memory import Session, SQLiteSessionStore, SummarizingSession, llm_summarizer
 from .orchestration import (
     Handoff,
     handoff,
@@ -53,9 +54,20 @@ from .orchestration import (
     supervisor,
 )
 from .otel import span_tree
+from .pricing import register_model_price
 from .providers import ParsedResponse, ToolInvocation
+from .rag import Hit, VectorIndex
 from .resilience import RetryPolicy
-from .result import Result, Run, Step
+from .result import (
+    Result,
+    RunComplete,
+    Step,
+    StreamEvent,
+    TextDelta,
+    ToolCallEvent,
+    ToolResultEvent,
+)
+from .result import Run as Run
 from .runner import Runner, run
 from .tools import Tool, tool
 
@@ -69,6 +81,11 @@ __all__ = [
     "run",
     "Runner",
     "Session",
+    # embeddings + RAG
+    "embed",
+    "aembed",
+    "VectorIndex",
+    "Hit",
     # orchestration (Phase 2)
     "handoff",
     "Handoff",
@@ -78,6 +95,9 @@ __all__ = [
     "supervisor",
     # interop (Phase 3)
     "load_mcp_tools",
+    "load_mcp_prompts",
+    "get_mcp_prompt",
+    "load_mcp_resources",
     "A2AServer",
     "A2AClient",
     "FoundryAdapter",
@@ -87,6 +107,8 @@ __all__ = [
     "RetryPolicy",
     "Checkpointer",
     "SQLiteSessionStore",
+    "SummarizingSession",
+    "llm_summarizer",
     "evaluate",
     "EvalCase",
     "EvalReport",
@@ -97,10 +119,18 @@ __all__ = [
     "Step",
     "ParsedResponse",
     "ToolInvocation",
+    # streaming events (run.stream / run.astream)
+    "StreamEvent",
+    "TextDelta",
+    "ToolCallEvent",
+    "ToolResultEvent",
+    "RunComplete",
     # governance (the real tokenguard/acttrace objects, re-exported)
     "budget",
     "track",
     "report",
+    "configure",
+    "register_model_price",
     "BudgetExceeded",
     "guard",
     "Policy",

@@ -23,7 +23,7 @@ from cendor.core.types import LLMCall, ToolCall
 
 from .providers import assistant_message, tool_result_message
 from .resilience import RetryPolicy, acall_with_retry, call_with_retry
-from .result import Result, Step
+from .result import Result, RunComplete, Step, TextDelta, ToolCallEvent, ToolResultEvent
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -92,7 +92,29 @@ def _prepare_messages(agent: Agent, input: Any, session: Session | None) -> list
         messages.extend(input)
     else:
         messages.append({"role": "user", "content": str(input)})
+    if getattr(agent, "retriever", None) is not None:
+        _inject_retrieved_context(agent, messages)
     return messages
+
+
+def _inject_retrieved_context(agent: Agent, messages: list[dict]) -> None:
+    """Retrieve context for the latest user query and insert it as a system message before it.
+
+    "Always-on" RAG: runs once per run, governed (the retriever's embed call rides the bus). No-op
+    if there's no user turn or the retriever returns nothing."""
+    from .providers import _text_of_content
+    from .rag import format_context
+
+    idx = next(
+        (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"), None
+    )
+    if idx is None:
+        return
+    raw = messages[idx].get("content")
+    query = raw if isinstance(raw, str) else _text_of_content(raw)
+    chunks = agent.retriever(query)
+    if chunks:
+        messages.insert(idx, {"role": "system", "content": format_context(chunks)})
 
 
 def _assemble(agent: Agent, messages: list[dict]) -> list[dict]:
@@ -121,6 +143,47 @@ def _stringify_result(value: Any) -> str:
         return json.dumps(value, default=str)
     except (TypeError, ValueError):
         return str(value)
+
+
+def _schema_from_output_type(output_type: Any) -> dict | None:
+    """Derive a JSON Schema from an ``output_type`` for provider-native structured output.
+
+    A dict is taken as a schema as-is; a Pydantic model via ``model_json_schema()``; a dataclass by
+    mapping its fields. ``None`` when no schema can be derived (falls back to a JSON nudge)."""
+    if output_type is None:
+        return None
+    if isinstance(output_type, dict):
+        return output_type
+    if hasattr(output_type, "model_json_schema"):  # pydantic
+        try:
+            return output_type.model_json_schema()
+        except Exception:  # noqa: BLE001 - schema derivation is best-effort
+            return None
+    if is_dataclass(output_type):
+        import dataclasses
+        import typing
+
+        from .tools import _schema_for_annotation
+
+        try:
+            hints = typing.get_type_hints(output_type)
+        except Exception:  # noqa: BLE001
+            hints = {}
+        props: dict[str, Any] = {}
+        required: list[str] = []
+        for f in dataclasses.fields(output_type):
+            props[f.name] = _schema_for_annotation(hints.get(f.name, f.type))
+            if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING:
+                required.append(f.name)
+        schema: dict[str, Any] = {
+            "type": "object",
+            "properties": props,
+            "additionalProperties": False,
+        }
+        if required:
+            schema["required"] = required
+        return schema
+    return None
 
 
 def _parse_output(content: Any, output_type: Any) -> Any:
@@ -222,7 +285,10 @@ def run_agent_sync(
                 json_mode=json_mode,
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
+                output_schema=_schema_from_output_type(agent.output_type),
             )
+            if agent.extra:
+                kwargs.update(agent.extra)  # provider-param passthrough (tool_choice, reasoning, …)
             parsed = provider.parse(call_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
@@ -279,12 +345,18 @@ async def run_agent_async(
                 json_mode=json_mode,
                 temperature=agent.temperature,
                 max_tokens=agent.max_tokens,
+                output_schema=_schema_from_output_type(agent.output_type),
             )
+            if agent.extra:
+                kwargs.update(agent.extra)  # provider-param passthrough (tool_choice, reasoning, …)
             parsed = provider.parse(await acall_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
-                for tc in parsed.tool_calls:
-                    result = await _exec_tool_async(resolve, tc)
+                # Execute a turn's tool calls concurrently; append results in request order.
+                results = await asyncio.gather(
+                    *(_exec_tool_async(resolve, tc) for tc in parsed.tool_calls)
+                )
+                for tc, result in zip(parsed.tool_calls, results, strict=True):
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     if tc.name in handoff_targets:
                         switched = handoff_targets[tc.name]
@@ -378,6 +450,7 @@ class Runner:
             trace_id=run_id,
             agents=[self.agent.name],
             messages=messages,
+            incomplete=output is None,  # no final answer (e.g. max_turns hit mid tool loop)
         )
 
     def run(self, input: Any) -> Result:
@@ -407,6 +480,155 @@ class Runner:
         return self._finish(run_id, output, steps, messages)
 
 
+# --------------------------------------------------------------------------- streaming
+
+
+def stream_agent_sync(
+    agent: Agent,
+    input: Any,
+    *,
+    session: Session | None = None,
+    audit: Any = None,
+    max_turns: int | None = None,
+) -> Any:
+    """Yield streaming events for a single agent run (``TextDelta`` / ``ToolCallEvent`` /
+    ``ToolResultEvent`` / terminal ``RunComplete``). Providers that reassemble a stream emit text
+    incrementally; the rest fall back to a whole-response delta. Same governance seams as ``run()``.
+    """
+    messages = _prepare_messages(agent, input, session)
+    run_id = uuid.uuid4().hex
+    provider = agent.provider_impl
+    create = provider.create_method(_client_for(agent, async_=False))
+    tools = agent.toolset
+    json_mode = agent.output_type is not None
+    turns = max_turns or agent.max_turns
+    output: Any = None
+
+    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+        for _turn in range(turns):
+            wire = _assemble(agent, messages)
+            kwargs = provider.build_kwargs(
+                agent.model,
+                wire,
+                tools,
+                agent.instructions,
+                json_mode=json_mode,
+                temperature=agent.temperature,
+                max_tokens=agent.max_tokens,
+                output_schema=_schema_from_output_type(agent.output_type),
+            )
+            if agent.extra:
+                kwargs.update(agent.extra)
+            if provider.supports_stream:
+                chunks: list = []
+                for chunk in create(**{**kwargs, "stream": True}):
+                    chunks.append(chunk)
+                    delta = provider.stream_text(chunk)
+                    if delta:
+                        yield TextDelta(delta)
+                parsed = provider.parse_stream(chunks)
+            else:  # provider has no reassembler → one whole-response delta
+                parsed = provider.parse(create(**kwargs))
+                if parsed.content:
+                    yield TextDelta(parsed.content)
+            messages.append(assistant_message(parsed.content, parsed.tool_calls))
+            if parsed.tool_calls:
+                for tc in parsed.tool_calls:
+                    yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                    result = _exec_tool_sync(agent.get_tool, tc)
+                    messages.append(tool_result_message(tc.id, tc.name, result))
+                    yield ToolResultEvent(tc.name, result)
+                continue
+            output = parsed.content
+            break
+
+    if session is not None:
+        session.replace(messages)
+    steps = [_step(agent.name, e) for e in events]
+    yield RunComplete(
+        Result(
+            output=_parse_output(output, agent.output_type),
+            steps=steps,
+            trace_id=run_id,
+            agents=[agent.name],
+            messages=messages,
+            incomplete=output is None,
+        )
+    )
+
+
+async def stream_agent_async(
+    agent: Agent,
+    input: Any,
+    *,
+    session: Session | None = None,
+    audit: Any = None,
+    max_turns: int | None = None,
+) -> Any:
+    """Async counterpart of :func:`stream_agent_sync` (``async for`` over the same events)."""
+    messages = _prepare_messages(agent, input, session)
+    run_id = uuid.uuid4().hex
+    provider = agent.provider_impl
+    create = provider.create_method(_client_for(agent, async_=True))
+    tools = agent.toolset
+    json_mode = agent.output_type is not None
+    turns = max_turns or agent.max_turns
+    output: Any = None
+
+    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+        for _turn in range(turns):
+            wire = _assemble(agent, messages)
+            kwargs = provider.build_kwargs(
+                agent.model,
+                wire,
+                tools,
+                agent.instructions,
+                json_mode=json_mode,
+                temperature=agent.temperature,
+                max_tokens=agent.max_tokens,
+                output_schema=_schema_from_output_type(agent.output_type),
+            )
+            if agent.extra:
+                kwargs.update(agent.extra)
+            if provider.supports_stream:
+                chunks = []
+                stream = await create(**{**kwargs, "stream": True})
+                async for chunk in stream:
+                    chunks.append(chunk)
+                    delta = provider.stream_text(chunk)
+                    if delta:
+                        yield TextDelta(delta)
+                parsed = provider.parse_stream(chunks)
+            else:
+                parsed = provider.parse(await create(**kwargs))
+                if parsed.content:
+                    yield TextDelta(parsed.content)
+            messages.append(assistant_message(parsed.content, parsed.tool_calls))
+            if parsed.tool_calls:
+                for tc in parsed.tool_calls:
+                    yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                    result = await _exec_tool_async(agent.get_tool, tc)
+                    messages.append(tool_result_message(tc.id, tc.name, result))
+                    yield ToolResultEvent(tc.name, result)
+                continue
+            output = parsed.content
+            break
+
+    if session is not None:
+        session.replace(messages)
+    steps = [_step(agent.name, e) for e in events]
+    yield RunComplete(
+        Result(
+            output=_parse_output(output, agent.output_type),
+            steps=steps,
+            trace_id=run_id,
+            agents=[agent.name],
+            messages=messages,
+            incomplete=output is None,
+        )
+    )
+
+
 # --------------------------------------------------------------------------- run() entrypoint
 
 
@@ -432,7 +654,14 @@ class _Run:
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents
 
-            return run_agents(list(agent), input, audit=audit, max_turns=max_turns)
+            return run_agents(
+                list(agent),
+                input,
+                audit=audit,
+                max_turns=max_turns,
+                session=session,
+                checkpoint=checkpoint,
+            )
         return Runner(
             agent,
             session=session,
@@ -456,7 +685,14 @@ class _Run:
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents_async
 
-            return await run_agents_async(list(agent), input, audit=audit, max_turns=max_turns)
+            return await run_agents_async(
+                list(agent),
+                input,
+                audit=audit,
+                max_turns=max_turns,
+                session=session,
+                checkpoint=checkpoint,
+            )
         return await Runner(
             agent,
             session=session,
@@ -465,6 +701,35 @@ class _Run:
             retry=retry,
             checkpoint=checkpoint,
         ).run_async(input)
+
+    def stream(
+        self,
+        agent: Any,
+        input: Any,
+        *,
+        session: Session | None = None,
+        audit: Any = None,
+        max_turns: int | None = None,
+    ) -> Any:
+        """Stream a **single** agent run as events (sync generator). Terminal event is
+        ``RunComplete`` carrying the ``Result``. Multi-agent streaming is not supported."""
+        if isinstance(agent, (list, tuple)):
+            raise TypeError("run.stream supports a single agent; use run([...]) for multi-agent")
+        return stream_agent_sync(agent, input, session=session, audit=audit, max_turns=max_turns)
+
+    def astream(
+        self,
+        agent: Any,
+        input: Any,
+        *,
+        session: Session | None = None,
+        audit: Any = None,
+        max_turns: int | None = None,
+    ) -> Any:
+        """Async counterpart of :meth:`stream` (``async for`` over the events)."""
+        if isinstance(agent, (list, tuple)):
+            raise TypeError("run.astream supports a single agent; use run([...]) for multi-agent")
+        return stream_agent_async(agent, input, session=session, audit=audit, max_turns=max_turns)
 
 
 run = _Run()

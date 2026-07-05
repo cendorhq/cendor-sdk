@@ -63,6 +63,10 @@ class Result:
     messages: list[dict] = field(default_factory=list)
     """The full conversation (canonical / OpenAI-shape messages), including tool results."""
 
+    incomplete: bool = False
+    """True if the run ended without a final answer — e.g. ``max_turns`` was hit with tool calls
+    still pending. A finished, answered run is ``False``."""
+
     # --- convenience views ---------------------------------------------------------------------
 
     @property
@@ -123,3 +127,44 @@ class Result:
 # The plan's data model names the run record ``Run`` (id == trace_id, agents, steps, output, usage,
 # cost). ``Result`` carries exactly that shape; expose both names.
 Run = Result
+
+
+# --------------------------------------------------------------------------- streaming events
+#
+# Yielded by ``run.stream`` / ``run.astream`` as a run progresses. The terminal ``RunComplete``
+# carries the same ``Result`` a blocking ``run()`` would return.
+
+
+@dataclass
+class TextDelta:
+    """A chunk of assistant text as it streams."""
+
+    text: str
+
+
+@dataclass
+class ToolCallEvent:
+    """The model asked to call a tool (emitted before the tool runs)."""
+
+    name: str
+    arguments: dict
+    id: str
+
+
+@dataclass
+class ToolResultEvent:
+    """A tool finished; ``result`` is its stringified output."""
+
+    name: str
+    result: str
+
+
+@dataclass
+class RunComplete:
+    """The terminal streaming event — carries the finished :class:`Result`."""
+
+    result: Result
+
+
+#: The union of events a streamed run yields.
+StreamEvent = TextDelta | ToolCallEvent | ToolResultEvent | RunComplete

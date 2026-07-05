@@ -8,6 +8,7 @@ phases build on.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -62,6 +63,130 @@ class Session:
 
     def __len__(self) -> int:
         return len(self.messages)
+
+
+_MEMORY_PREFIX = "Conversation summary so far:\n"
+
+#: A summarizer folds old turns into a note: ``summarizer(old_messages, prior_summary) -> summary``.
+Summarizer = Callable[[list[dict], "str | None"], str]
+
+
+def _render_messages(messages: list[dict]) -> str:
+    """Flatten canonical messages to plain text for a summarizer (tool calls noted inline)."""
+    lines: list[str] = []
+    for m in messages:
+        role = m.get("role", "?")
+        content = m.get("content")
+        if isinstance(content, list):  # multimodal → keep the text parts
+            content = " ".join(
+                str(p.get("text", "")) for p in content if isinstance(p, dict) and p.get("text")
+            )
+        text = str(content or "")
+        for tc in m.get("tool_calls") or []:
+            text += f" [called {tc.get('function', {}).get('name', '')}]"
+        lines.append(f"{role}: {text}".strip())
+    return "\n".join(lines)
+
+
+def llm_summarizer(
+    model: str,
+    *,
+    provider: str | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    max_tokens: int = 512,
+) -> Summarizer:
+    """Build a governed summarizer that folds old turns into a concise note via one model call.
+
+    The summarization is itself a governed ``run`` (its ``LLMCall`` rides the bus — cost/audit
+    apply). Use a cheap model here (e.g. ``gpt-4o-mini``). Synchronous; for ``run.aio`` this runs
+    between turns, so keep it fast or pass your own async-friendly summarizer.
+    """
+
+    def summarize(old: list[dict], prior: str | None) -> str:
+        from .agent import Agent
+        from .runner import run
+
+        parts = []
+        if prior:
+            parts.append(f"Summary so far:\n{prior}\n")
+        parts.append("Additional conversation to fold in:\n" + _render_messages(old))
+        prompt = "\n".join(parts) + (
+            "\n\nReturn an updated, concise summary preserving durable facts, decisions, names, "
+            "and open threads. Prose only."
+        )
+        agent = Agent(
+            name="memory-summarizer",
+            model=model,
+            provider=provider,
+            api_key=api_key,
+            base_url=base_url,
+            instructions="You maintain a running summary of a conversation as durable memory.",
+            max_tokens=max_tokens,
+        )
+        return str(run(agent, prompt).output or "")
+
+    return summarize
+
+
+class SummarizingSession(Session):
+    """A ``Session`` that folds old turns into a durable summary note when it grows too long.
+
+    Keeps the last ``keep_recent`` messages verbatim; older turns are summarized into a single
+    system "memory" message (merged with any prior summary), so the conversation stays bounded but
+    the gist persists — beyond what ``context_budget`` (token-budget trimming) alone retains.
+    Summarization triggers automatically after each run (when the runner writes the session back).
+
+    ```python
+    from cendor.sdk import SummarizingSession, run
+    mem = SummarizingSession(model="gpt-4o-mini", max_messages=20, keep_recent=8)
+    run(agent, "…", session=mem)   # long chats auto-summarize; recent turns stay verbatim
+    ```
+
+    Pass a custom ``summarizer`` callable instead of ``model`` for offline/extractive summaries.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str | None = None,
+        summarizer: Summarizer | None = None,
+        max_messages: int = 20,
+        keep_recent: int = 8,
+        messages: list[dict] | None = None,
+    ) -> None:
+        super().__init__(messages=list(messages or []))
+        if summarizer is None and model is None:
+            raise ValueError("SummarizingSession needs a summarizer= callable or a model=")
+        self._summarizer: Summarizer = summarizer or llm_summarizer(model)  # type: ignore[arg-type]
+        self.max_messages = max_messages
+        self.keep_recent = keep_recent
+
+    def replace(self, messages: list[dict]) -> None:
+        super().replace(messages)
+        self._maybe_summarize()
+
+    def _maybe_summarize(self) -> None:
+        if len(self.messages) <= self.max_messages:
+            return
+        body = self.messages
+        prior: str | None = None
+        head = body[0] if body else None
+        if (
+            head
+            and head.get("role") == "system"
+            and str(head.get("content", "")).startswith(_MEMORY_PREFIX)
+        ):
+            prior = str(head["content"])[len(_MEMORY_PREFIX) :]
+            body = body[1:]
+        keep = max(self.keep_recent, 0)
+        old = body[:-keep] if keep else body
+        recent = body[-keep:] if keep else []
+        if not old:
+            return
+        summary = self._summarizer(old, prior)
+        note = {"role": "system", "content": _MEMORY_PREFIX + summary}
+        self.messages = [note, *recent]
 
 
 class SQLiteSessionStore:
