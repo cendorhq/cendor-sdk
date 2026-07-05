@@ -1,0 +1,117 @@
+[project]
+name = "cendor-sdk"
+version = "0.1.0"
+description = "A governed, provider-agnostic agent SDK — cost budgets, tamper-evident audit, PII redaction, context governance, and record/replay testing as the foundation, not plugins. The second door to the Cendor stack."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Cendor" }]
+keywords = ["agent", "sdk", "llm", "governance", "budget", "audit", "openai", "anthropic"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+
+# Batteries-included: bundle the whole Cendor stack by depending on the published libraries
+# (loose >=1.x,<2 ranges so a user who installs cendor-sdk AND a library à la carte resolves to
+# one compatible set). NEVER vendor — one cendor.* subpackage per distribution (we ship cendor.sdk).
+dependencies = [
+  "cendor-core>=1.2,<2",         # trace()/current_trace_id() correlation
+  "cendor-tokenguard>=1.1,<2",   # budget()/track()
+  "cendor-acttrace>=1.2,<2",     # AuditLog/guard/Policy (guard redact-before-send needs core>=1.1)
+  "cendor-contextkit>=1.0,<2",   # assemble-to-budget + provider message adapters
+  "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; auto-wires via core's seam)
+  "cendor-cassette>=1.0,<2",     # record/replay — the SDK's test fixture format AND replay engine
+]
+
+[project.optional-dependencies]
+# Provider SDKs stay optional extras — never hard deps (CLAUDE.md).
+openai = ["openai>=1.0"]
+anthropic = ["anthropic>=0.30"]
+google = ["google-genai>=0.3"]
+bedrock = ["boto3>=1.34"]
+ollama = ["ollama>=0.3"]
+mcp = ["mcp>=1.0"]                       # Phase 3 — consume MCP tools as Tools
+otel = ["cendor-core[otel]"]            # Phase 3 — full-run gen_ai span tree
+all = [
+  "openai>=1.0",
+  "anthropic>=0.30",
+  "google-genai>=0.3",
+  "mcp>=1.0",
+  "cendor-core[otel]",
+]
+
+[project.urls]
+Homepage = "https://github.com/cendorhq/cendor-sdk"
+Repository = "https://github.com/cendorhq/cendor-sdk"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cendor"]     # contributes cendor/sdk ONLY — NEVER add src/cendor/__init__.py
+
+# --- Dev-time source override (plan §4) ---------------------------------------------------------
+# Resolve the Cendor libraries from the local monorepo checkout (editable) for fast iteration
+# against a local core without publishing every change. A RELEASED build drops this table and the
+# loose PyPI ranges above take effect. This is dev-only and never ships in the wheel.
+[tool.uv.sources]
+cendor-core = { path = "../Cendor/packages/cendor-core", editable = true }
+cendor-tokenguard = { path = "../Cendor/packages/cendor-tokenguard", editable = true }
+cendor-acttrace = { path = "../Cendor/packages/cendor-acttrace", editable = true }
+cendor-contextkit = { path = "../Cendor/packages/cendor-contextkit", editable = true }
+cendor-squeeze = { path = "../Cendor/packages/cendor-squeeze", editable = true }
+cendor-cassette = { path = "../Cendor/packages/cendor-cassette", editable = true }
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.23",
+  "hypothesis>=6",
+  "ruff>=0.6",
+  "mypy>=1.10",
+  # Tests exercise the real openai/anthropic stack with HTTP mocked by respx — no network, no keys.
+  "respx>=0.21",
+  "httpx>=0.27",
+  "openai>=1.0",
+  "anthropic>=0.30",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.mypy]
+python_version = "3.11"
+namespace_packages = true
+explicit_package_bases = true
+
+# Optional provider/interop SDKs are imported lazily behind try/except — not installed by default,
+# so don't fail type-checking when their stubs are absent.
+[[tool.mypy.overrides]]
+module = [
+  "openai.*",
+  "anthropic.*",
+  "google.*",
+  "boto3.*",
+  "ollama.*",
+  "mcp.*",
+  "respx.*",
+  "opentelemetry.*",
+]
+ignore_missing_imports = true
