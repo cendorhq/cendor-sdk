@@ -6,6 +6,19 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.0] — First stable release
+
+Consolidates Phases 1–4 into a stable, documented release (plan §12): the governed agent loop,
+multi-agent orchestration, ecosystem interop, and production hardening + governed eval are complete,
+provider-agnostic, local-first, and tested offline. This marks API stability — no new features vs
+`0.4.0`.
+
+- Full docs pass: `docs/index.md` links every page and lists the public API surface; the two-door
+  framing (libraries primary, SDK secondary) is consistent across the README and docs.
+- Marked `Development Status :: 5 - Production/Stable`.
+- Verification: `uv run pytest` green (58 tests, no network), `ruff check`/`ruff format` clean,
+  mypy clean, namespace-guard clean, `import cendor.sdk` works.
+
 ## [0.4.0] — Phase 4: Production hardening & governed eval
 
 The "safe for real workloads" layer plus the testing wedge fully realized.
