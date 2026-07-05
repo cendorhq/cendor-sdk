@@ -1,0 +1,55 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs for the same ref (PR pushes); never cancel a main-branch build.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]   # development happens on Windows — test it too
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash   # Git Bash on the Windows runner, so `find`/heredocs work cross-platform
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: cendorhq/Cendor
+          path: Cendor           # the dev source override in pyproject resolves ../Cendor/packages/*
+      - uses: actions/checkout@v5
+        with:
+          path: cendor-sdk
+      - uses: astral-sh/setup-uv@v3
+      - name: sync
+        working-directory: cendor-sdk
+        run: uv sync
+      - name: ruff lint
+        working-directory: cendor-sdk
+        run: uv run ruff check .
+      - name: ruff format check
+        working-directory: cendor-sdk
+        run: uv run ruff format --check .
+      - name: namespace guard (no top-level cendor/__init__.py)
+        working-directory: cendor-sdk
+        run: |
+          if find src -path '*/cendor/__init__.py' | grep . ; then
+            echo "ERROR: a top-level cendor/__init__.py exists — it breaks the PEP 420 namespace"; exit 1
+          fi
+          echo "namespace-guard: OK"
+      - name: type-check
+        working-directory: cendor-sdk
+        run: uv run mypy -p cendor.sdk
+      - name: tests
+        working-directory: cendor-sdk
+        run: uv run pytest -q
+      - name: import check
+        working-directory: cendor-sdk
+        run: uv run python -c "import cendor.sdk; print('import cendor.sdk OK', cendor.sdk.__version__)"

@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.uv/
+uv.lock
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+.coverage
+coverage.json
+htmlcov/
+.smoke/
+.idea/
+.vscode/
+.DS_Store
+*.log
+
+# Local scratch / audit artifacts produced by examples & tests
+audit.jsonl
+*.audit.jsonl
+checkpoints/
