@@ -9,9 +9,10 @@ returning ``False``** if OpenTelemetry isn't installed (local-first — telemetr
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Any
 
-from cendor.core.types import LLMCall
+from cendor.core.types import LLMCall, ToolCall
 
 from .result import Result, Step
 
@@ -110,3 +111,75 @@ def _set_tool_attrs(span: Any, call: Any) -> None:
         inner = args.get("kwargs") if isinstance(args.get("kwargs"), dict) else args
         if isinstance(inner, dict) and inner:
             span.set_attribute("gen_ai.tool.arg_names", ",".join(sorted(map(str, inner))))
+
+
+@contextmanager
+def live_spans(tracer: Any = None, *, name: str = "agent.run") -> Any:
+    """Emit ``gen_ai`` spans **live** as a run progresses — the streaming counterpart to
+    :func:`span_tree` (which builds the tree post-hoc from a finished ``Result``). Wrap a run:
+
+    ```python
+    from cendor.sdk import run
+    from cendor.sdk.otel import live_spans
+    with live_spans():
+        result = run(agent, "...")
+    ```
+
+    A root ``agent.run`` span brackets the block; a child ``chat {model}`` / ``execute_tool {name}``
+    span is emitted the moment each call completes (its start time backdated by the call's
+    ``latency_ms`` so the duration is accurate), so a live backend sees the trajectory in real time
+    rather than all at once at the end. Works for single- and multi-agent runs (each span carries a
+    ``cendor.trace_id``). A **no-op** (still runs the block) if OpenTelemetry isn't installed.
+    """
+    try:
+        from opentelemetry import trace as ot
+    except ImportError:
+        yield
+        return
+
+    import time
+
+    from cendor.core import bus
+
+    tracer = tracer or ot.get_tracer("cendor.sdk")
+    with tracer.start_as_current_span(name) as root:
+        root.set_attribute("gen_ai.operation.name", "agent")
+        ctx = ot.set_span_in_context(root)
+
+        def on_event(ev: Any) -> None:
+            if not isinstance(ev, (LLMCall, ToolCall)):
+                return
+            end = time.time_ns()
+            latency = getattr(ev, "latency_ms", None)
+            start = end - int(
+                (latency or 0) * 1_000_000
+            )  # backdate by latency for accurate duration
+            if isinstance(ev, LLMCall):
+                span = tracer.start_span(f"chat {ev.model}", context=ctx, start_time=start)
+                span.set_attribute("gen_ai.operation.name", "chat")
+                span.set_attribute("gen_ai.system", ev.provider)
+                span.set_attribute("gen_ai.request.model", ev.model)
+                span.set_attribute("cendor.trace_id", getattr(ev, "trace_id", ""))
+                _set_call_attrs(span, ev)
+                if ev.usage is not None:
+                    span.set_attribute("gen_ai.usage.input_tokens", ev.usage.input_tokens)
+                    span.set_attribute("gen_ai.usage.output_tokens", ev.usage.output_tokens)
+                    if ev.usage.reasoning_tokens:
+                        span.set_attribute(
+                            "gen_ai.usage.reasoning_tokens", ev.usage.reasoning_tokens
+                        )
+                if ev.cost is not None:
+                    span.set_attribute("gen_ai.usage.cost", str(ev.cost.amount))
+            else:
+                span = tracer.start_span(f"execute_tool {ev.name}", context=ctx, start_time=start)
+                span.set_attribute("gen_ai.operation.name", "execute_tool")
+                span.set_attribute("gen_ai.tool.name", ev.name)
+                span.set_attribute("cendor.trace_id", getattr(ev, "trace_id", ""))
+                _set_tool_attrs(span, ev)
+            span.end(end_time=end)
+
+        bus.subscribe(on_event)
+        try:
+            yield
+        finally:
+            bus.unsubscribe(on_event)
