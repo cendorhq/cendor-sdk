@@ -8,8 +8,8 @@ OpenTelemetry is installed and configured.
 
 ## MCP — consume Model Context Protocol tools
 
-> **Python only.** MCP, A2A, and the Foundry adapter are not yet in `@cendor/sdk` — the
-> OpenTelemetry span tree and human-in-the-loop sections below are ported. See the
+> **Now in TypeScript.** MCP tool loading, A2A, and the Foundry adapter are ported to `@cendor/sdk`,
+> alongside the OpenTelemetry span tree and human-in-the-loop sections below. See the
 > [parity matrix](/docs/languages).
 
 `load_mcp_tools(session)` turns an MCP server's tools into governed `Tool`s (the schema comes
@@ -34,9 +34,15 @@ async with stdio_client(params) as (r, w), ClientSession(r, w) as session:
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** MCP tool loading isn't yet in `@cendor/sdk` — same seam, lands per
-> the [parity matrix](/docs/languages). Until then, wrap an MCP client's tools as ordinary
-> `tool(...)`s yourself.
+```ts
+import { Agent, run, loadMcpTools } from '@cendor/sdk';
+
+// `session` is your MCP client session — the duck-typed shape of @modelcontextprotocol/sdk's
+// `Client` (camelCase `listTools()` / `callTool(name, args)`); a fake session tests it offline.
+const tools = await loadMcpTools(session);       // each MCP tool -> a governed Tool
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', tools, instructions: 'Use the tools.' });
+const result = await run(agent, '…');            // MCP calls flow through the bus/audit/budget
+```
 
 <!-- /tabs -->
 
@@ -70,8 +76,23 @@ httpd = serve(agent, host="127.0.0.1", port=8080)   # GET /.well-known/agent-car
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The A2A server/client aren't yet in `@cendor/sdk` — see the
-> [parity matrix](/docs/languages).
+```ts
+import { Agent, A2AServer, A2AClient, serve } from '@cendor/sdk';
+
+const agent  = new Agent({ name: 'greeter', model: 'gpt-4o', instructions: 'Greet.' });
+const server = new A2AServer(agent);
+
+// In-process (offline / embedded):
+const client = new A2AClient(server);
+console.log(client.card());              // the A2A agent card (name, skills, IO modes)
+console.log(await client.send('hi'));    // -> the agent's reply
+const full = await client.sendFull('hi'); // full A2A result incl. governance metadata:
+                                         //   { metadata: { trace_id, cost_usd, agents } }
+
+// Over local HTTP (optional, opt-in — node:http only):
+const httpd = serve(agent, { host: '127.0.0.1', port: 8080 }); // GET /.well-known/agent-card.json ; POST /
+// httpd.close() to stop
+```
 
 <!-- /tabs -->
 
@@ -99,8 +120,17 @@ adapter.manifest()                                # minimal registration manifes
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The Foundry/Bot-Framework adapter isn't yet in `@cendor/sdk` — see
-> the [parity matrix](/docs/languages).
+```ts
+import { Agent, FoundryAdapter } from '@cendor/sdk';
+
+const adapter = new FoundryAdapter(new Agent({ name: 'assistant', model: 'gpt-4o', instructions: 'Help.' }));
+
+// In your web endpoint:
+const incomingActivity = { type: 'message', text: 'hi', from: { id: 'user' } };
+const reply = await adapter.onActivity(incomingActivity);  // -> outgoing message Activity, or null
+// reply?.channelData.cendor carries { trace_id, cost_usd, agents }
+adapter.manifest();                                        // minimal registration manifest
+```
 
 <!-- /tabs -->
 

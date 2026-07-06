@@ -40,9 +40,8 @@ so usage and cost are never double-counted.
 
 ### Checkpointed & resumable runs
 
-> **Python only.** `checkpoint=` is not yet in `@cendor/sdk` — durable memory via
-> `SqliteSessionStore` (below) is the TypeScript-available persistence today. See the
-> [parity matrix](/docs/languages).
+> **Now in TypeScript.** `checkpoint` is ported to `@cendor/sdk` (a path or a `Checkpointer`),
+> alongside durable memory via `SqliteSessionStore` (below). See the [parity matrix](/docs/languages).
 
 Pass `checkpoint=` (a path or a `Checkpointer`) and the run persists its conversation after each
 turn. If the process crashes, calling `run` again with the same checkpoint **resumes** from the
@@ -68,8 +67,21 @@ result = run(agent, "a long task", checkpoint="run.ckpt.json")
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** `checkpoint=` isn't yet in `@cendor/sdk` — persist the conversation
-> with [`SqliteSessionStore`](memory.md) meanwhile. See the [parity matrix](/docs/languages).
+```ts
+import { Agent, run } from '@cendor/sdk';
+
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', tools: [/* ... */], instructions: '…' });
+
+// First attempt crashes mid-run; the checkpoint holds the completed turns.
+try {
+  await run(agent, 'a long task', { checkpoint: 'run.ckpt.json' });
+} catch {
+  // …
+}
+
+// Later — same checkpoint — resumes where it left off (no re-running earlier tools):
+const result = await run(agent, 'a long task', { checkpoint: 'run.ckpt.json' });
+```
 
 <!-- /tabs -->
 
