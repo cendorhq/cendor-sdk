@@ -21,12 +21,18 @@ pip install "cendor-sdk[openai,anthropic]"   # or [all] for every provider + int
 
 | Page | Covers |
 |---|---|
-| [docs/index.md](docs/index.md) | Start here — the two doors + the public API surface |
-| [docs/sdk.md](docs/sdk.md) | Quickstart, the loop, tools, structured output, providers, streaming, RAG, memory |
+| [docs/index.md](docs/index.md) | Start here — which door, the pages, what "governed" means |
+| [docs/getting-started.md](docs/getting-started.md) | Install (pip / npm), a first governed agent, where each concept lives |
+| [docs/agents.md](docs/agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal |
+| [docs/governance.md](docs/governance.md) | Budgets, attribution, audit + redaction, record/replay testing |
+| [docs/memory.md](docs/memory.md) | Sessions, durable stores, summarization, window fitting |
+| [docs/rag.md](docs/rag.md) | Governed embeddings, `VectorIndex`, always-on & agentic retrieval |
 | [docs/multi-agent.md](docs/multi-agent.md) | Handoff, supervisor/router, sequential & parallel |
+| [docs/providers.md](docs/providers.md) | The ten provider paths; HF / Azure AI Foundry / Foundry Local setup |
 | [docs/interop.md](docs/interop.md) | MCP, A2A, Foundry/Copilot, OTel span tree, human-in-the-loop |
 | [docs/hardening.md](docs/hardening.md) | Retries, checkpointed/resumable runs, durable memory |
 | [docs/eval.md](docs/eval.md) | Cassette-backed governed eval & regression testing |
+| [docs/faq.md](docs/faq.md) | Common questions — including "libraries or SDK?" |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [examples/](examples/) | Runnable, network-free examples |
 

@@ -1,57 +1,96 @@
-# cendor-sdk documentation
+# cendor-sdk
 
-**A governed, provider-agnostic agent SDK — the second door into Cendor.**
+**A governed agent in 10 lines.** `cendor-sdk` is a thin, provider-agnostic agent SDK where
+governance — budgets, tamper-evident audit, PII redaction, record/replay testing — is the
+foundation, not a plugin. Local-first · no servers · Apache-2.0. Available for
+**Python** (`pip install cendor-sdk`) and **TypeScript/JavaScript** (`npm i @cendor/sdk`).
 
-Cendor is *production plumbing for LLM applications*. There are two front doors:
+## Which door do I need?
 
-- **The libraries** (primary) — *"production plumbing beneath your framework."* Already using
-  LangChain / LlamaIndex / a provider SDK? Compose the libraries underneath it: `pip install cendor`.
-- **`cendor-sdk`** (this project) — *"a governed agent in 10 lines."* Starting fresh or want it
-  simple? Don't pick a framework or wire the libraries — just use the SDK: `pip install cendor-sdk`.
+Cendor is *production plumbing for LLM applications*, and there are two front doors into it:
 
-Both doors expose the **same primitives** (`budget`, `guard`, `Policy`, `AuditLog`, `trace`), so
-moving between them is continuous, never a migration.
+- **The [libraries](/docs)** — *plumbing beneath your framework.* Already using LangChain,
+  LlamaIndex, or a provider SDK directly? Keep it, and compose the libraries underneath with one
+  `instrument()` wrap.
+- **`cendor-sdk`** (these docs) — *the whole loop, governed.* Starting fresh, or don't want to
+  pick a framework and wire libraries together? The SDK gives you `Agent`, `tool`, and `run` with
+  every governance layer one import away.
+
+Both doors expose the **same primitives** — `budget`, `guard`, `Policy`, `AuditLog`, `trace` are
+the *real* library objects, re-exported. Start on the SDK and drop down to the libraries later (or
+mix them in the same process); it's continuous, never a migration.
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}} }%%
+graph TD
+    APP["your application"]
+    SDK["cendor-sdk<br/>Agent · tool · run"]
+    LIBS["the six libraries<br/>contextkit · squeeze · tokenguard · cassette · acttrace"]
+    CORE["cendor-core<br/>instrument() seam + event bus"]
+    PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
+
+    APP -->|"door 2: the SDK loop"| SDK --> CORE
+    APP -->|"door 1: beneath your framework"| LIBS
+    LIBS --- CORE
+    CORE --> PROV
+
+    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
+    class CORE seam;
+```
 
 ## Pages
 
 | Page | What it covers |
 |---|---|
-| [sdk.md](sdk.md) | Quickstart, the agent loop, tools, structured output, sessions, governance, testing — plus providers, streaming, RAG, memory, and embeddings. |
-| [multi-agent.md](multi-agent.md) | Handoff, supervisor/router, sequential & parallel pipelines. |
-| [interop.md](interop.md) | MCP tools, A2A, Foundry/Copilot, OTel span tree, human-in-the-loop. |
-| [hardening.md](hardening.md) | Retries, timeouts, checkpointed/resumable runs, durable memory. |
-| [eval.md](eval.md) | Cassette-backed governed eval & regression harness. |
+| [Getting started](getting-started.md) | Install, a first governed agent, and where each concept lives. |
+| [Agents & the loop](agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal. |
+| [Governance](governance.md) | Budgets, spend attribution, audit + redaction, record/replay testing. |
+| [Memory & sessions](memory.md) | `Session`, durable stores, summarization, fitting memory to the window. |
+| [Retrieval (RAG)](rag.md) | Governed embeddings, `VectorIndex`, always-on and agentic retrieval. |
+| [Multi-agent](multi-agent.md) | Handoff, supervisor, pipelines — one correlated, governed tree. |
+| [Providers](providers.md) | The ten provider paths, Hugging Face / Azure AI Foundry / Foundry Local setup, pricing custom models. |
+| [Ecosystem & interop](interop.md) | MCP tools, A2A, Foundry/Copilot, OpenTelemetry, human-in-the-loop. |
+| [Production hardening](hardening.md) | Retries, checkpointed/resumable runs, durable memory. |
+| [Eval & regression testing](eval.md) | Replay recorded trajectories as CI tests — behaviour *and* spend. |
+| [FAQ](faq.md) | Common questions, including "libraries or SDK?" in depth. |
 
-## Public API surface
+## What "governed" means here
 
-Everything below is importable from `cendor.sdk`.
+Four production concerns ride every run without per-call wiring, because the SDK executes each
+model and tool call through [`cendor-core`](/docs/core)'s event bus:
 
-| Group | Names |
-|---|---|
-| Agent & loop | `Agent`, `tool`, `Tool`, `run` (`.aio` / `.stream` / `.astream`), `Runner` |
-| Result model | `Result`, `Run`, `Step`, `ParsedResponse`, `ToolInvocation` |
-| Streaming events | `StreamEvent`, `TextDelta`, `ToolCallEvent`, `ToolResultEvent`, `RunComplete` |
-| Orchestration (P2) | `handoff`, `Handoff`, `sequential`, `parallel`, `parallel_async`, `supervisor` |
-| Memory | `Session`, `SummarizingSession`, `llm_summarizer`, `SQLiteSessionStore` |
-| Retrieval & embeddings | `embed`, `aembed`, `VectorIndex`, `Hit` |
-| Governance (re-exported) | `budget`, `track`, `report`, `configure`, `register_model_price`, `BudgetExceeded`, `guard`, `Policy`, `AuditLog`, `verify` |
-| Correlation | `trace`, `current_trace_id` |
-| Interop (P3) | `load_mcp_tools`, `load_mcp_prompts`, `get_mcp_prompt`, `load_mcp_resources`, `A2AServer`, `A2AClient`, `FoundryAdapter`, `span_tree`, `require_approval` |
-| Hardening & eval (P4) | `RetryPolicy`, `Checkpointer`, `evaluate`, `EvalCase`, `EvalReport`, `EvalResult` |
+- **Cost** — [`budget(...)`](governance.md#budgets) caps a run *before* an over-budget call executes;
+  [`track(...)`](governance.md#attribution) attributes spend per feature/user for free.
+- **Evidence** — an [`AuditLog`](governance.md#audit--redaction) records every step in a
+  tamper-evident hash chain you can `verify()` offline.
+- **Privacy** — [`guard(Policy...)`](governance.md#audit--redaction) redacts PII before the
+  provider ever sees it.
+- **Testability** — [`cassette`](governance.md#testing--record-once-replay-forever) records a run
+  once and replays it forever: offline, deterministic, free.
 
-The governance objects (`budget`/`track`/`report` from tokenguard; `Policy`/`AuditLog`/`verify`
-from acttrace) are the **real** library objects, re-exported — so a team can start on the SDK and
-later drop to the libraries with no concept rewrite. `guard` is the SDK's context-manager wrapper
-over `acttrace.guard`. Extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`, `[ollama]`,
-`[huggingface]`, `[azure]`, `[foundry-local]`, `[mcp]`, `[otel]`, and `[all]`.
+Every layer is optional — an ungoverned `run()` works with just `cendor-core` installed.
 
-## Design principles (do not break)
+## Install
 
-1. **Cooperate through core.** The SDK hard-depends on `cendor-core` only; the governance tools
-   integrate through core's bus / interceptor / `Sink` / `Compressor` seams.
-2. **Governed by default, escapable.** Every governance layer is optional — an ungoverned `run()`
-   works with just `cendor-core`.
-3. **Namespace safety.** This distribution ships `cendor.sdk` **only** — never `src/cendor/__init__.py`.
-4. **Local-first, no servers.** Cloud / OTel export is always optional and opt-in.
+```bash
+pip install "cendor-sdk[openai,anthropic]"   # Python — provider SDKs are optional extras
+npm i @cendor/sdk openai                     # TypeScript/JS — providers are peer dependencies
+```
 
-See the [CHANGELOG](../CHANGELOG.md) for the release history.
+Full install options, extras, and the first runnable example:
+[Getting started](getting-started.md). Language parity (what's ported, what's Python-only):
+[/docs/languages](/docs/languages).
+
+## Design principles
+
+1. **Cooperate through core.** The SDK hard-depends only on `cendor-core`; every governance tool
+   integrates through core's bus and interceptor seams — nothing patches anything.
+2. **Governed by default, escapable.** Each layer is one argument or one `with` block; removing it
+   never breaks the loop.
+3. **Local-first, no servers.** Sessions, checkpoints, audit chains, and cassettes are local files.
+   Cloud and OpenTelemetry export are optional and opt-in.
+4. **Same API in both languages.** `snake_case` ↔ `camelCase`, identical defaults and error names —
+   see the [parity matrix](/docs/languages).
+
+See the [CHANGELOG](https://github.com/cendorhq/cendor-sdk/blob/main/CHANGELOG.md) for release
+history.
