@@ -1,7 +1,7 @@
 [project]
 name = "cendor-sdk"
 version = "1.1.0"
-description = "A governed, provider-agnostic agent SDK — cost budgets, tamper-evident audit, PII redaction, context governance, and record/replay testing as the foundation, not plugins. The second door to the Cendor stack."
+description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
