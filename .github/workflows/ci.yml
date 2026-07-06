@@ -20,9 +20,13 @@ jobs:
       run:
         shell: bash   # Git Bash on the Windows runner, so `find`/heredocs work cross-platform
     steps:
+      # cendor-libs is a PRIVATE sibling repo; the default GITHUB_TOKEN cannot read it (404).
+      # SIBLING_CHECKOUT_TOKEN must be a PAT with read access to cendorhq/cendor-libs.
+      # Drop the `token:` line once cendor-libs is made public.
       - uses: actions/checkout@v5
         with:
           repository: cendorhq/cendor-libs
+          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
           path: cendor-libs      # the dev source override in pyproject resolves ../cendor-libs/packages/*
       - uses: actions/checkout@v5
         with:
