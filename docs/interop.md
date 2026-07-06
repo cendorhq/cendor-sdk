@@ -172,7 +172,7 @@ run(agent, "Refund order 42 for $50", audit=log)
 ```ts
 import { Agent, run, AuditLog, requireApproval } from '@cendor/sdk';
 
-const approver = (toolName, args) =>
+const approver = (toolName, args): [boolean, string] =>
   [args.amount < 100, 'auto-approved under $100'];   // -> [approved, note]
 
 const refund = requireApproval(issueRefundTool, { approver, reviewer: 'ops@bank' });

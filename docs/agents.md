@@ -67,6 +67,8 @@ Agent(
 
 <!-- tab: TypeScript -->
 
+<!-- ts-check: skip -->
+
 ```ts
 new Agent({
   name: string,
@@ -151,6 +153,8 @@ await run.aio(agent, input, ...)     # async — same signature
 ```
 
 <!-- tab: TypeScript -->
+
+<!-- ts-check: skip -->
 
 ```ts
 await run(agent, input, { session?, audit?, maxTurns?, retry?, onStep? })  // -> Result
