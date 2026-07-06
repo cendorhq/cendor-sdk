@@ -93,9 +93,10 @@ Or use a `tokens=` cap (tokens are counted regardless of price), or
 
 ## Hugging Face
 
-> **Python only.** The Hugging Face, Azure AI Foundry, and Foundry Local providers below are not
-> yet in `@cendor/sdk` — TypeScript ships OpenAI (Chat + Responses) + Anthropic first, with the
-> same `Provider` seam for the rest. See the [parity matrix](/docs/languages).
+> **Now in TypeScript.** The Hugging Face, Azure AI Foundry, and Foundry Local providers below are
+> ported to `@cendor/sdk`. Azure and Foundry Local wrap the standard `openai` client, so cost and
+> usage are captured end-to-end today; Hugging Face parses responses now, with usage capture
+> arriving alongside the matching `@cendor/core` detection. See the [parity matrix](/docs/languages).
 
 Uses `huggingface_hub.InferenceClient.chat_completion` — the response is OpenAI-shaped, and the
 call is attributed to `huggingface`, not `openai`. The `model` is a Hub id or an Inference
@@ -123,8 +124,22 @@ agent = Agent(name="hf", model="tgi", provider="huggingface",
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The Hugging Face provider isn't yet in `@cendor/sdk` — see the
-> [parity matrix](/docs/languages).
+```ts
+import { Agent, run } from '@cendor/sdk';
+
+// Serverless Inference API — token from apiKey= or the HF_TOKEN / HUGGINGFACEHUB_API_TOKEN env var
+const agent = new Agent({
+  name: 'hf',
+  model: 'meta-llama/Llama-3.1-8B-Instruct',
+  provider: 'huggingface',        // required — Hub ids aren't prefix-inferable
+  apiKey: 'hf_...',               // optional; falls back to HF_TOKEN
+});
+const result = await run(agent, 'Summarize the plot of Hamlet in two lines.');
+
+// A dedicated Inference Endpoint (or a third-party provider) — point baseURL at it:
+const endpoint = new Agent({ name: 'hf', model: 'tgi', provider: 'huggingface',
+  baseURL: 'https://<your-endpoint>.endpoints.huggingface.cloud' });
+```
 
 <!-- /tabs -->
 
@@ -164,8 +179,22 @@ with budget(usd=0.10, on_exceed="block"):
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The Azure AI Foundry provider isn't yet in `@cendor/sdk` — see the
-> [parity matrix](/docs/languages).
+```ts
+import { Agent, run, withBudget } from '@cendor/sdk';
+
+// Azure OpenAI models:      https://<res>.openai.azure.com
+// Foundry Models (DeepSeek, Grok, Llama, …): https://<res>.services.ai.azure.com — both work
+const agent = new Agent({
+  name: 'foundry',
+  model: 'my-gpt4o-deployment',       // your Foundry DEPLOYMENT name
+  provider: 'azure',
+  baseURL: 'https://my-resource.openai.azure.com',   // or AZURE_OPENAI_ENDPOINT
+  apiKey: '<resource-key>',           // or AZURE_OPENAI_API_KEY / AZURE_INFERENCE_CREDENTIAL
+});
+
+const result = await withBudget({ usd: 0.10, onExceed: 'block' }, () =>
+  run(agent, 'Draft a one-line release note.'));
+```
 
 <!-- /tabs -->
 
@@ -186,8 +215,10 @@ agent = Agent(name="foundry", model="my-gpt4o-deployment", provider="azure", cli
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** Entra ID keyless construction rides the Azure provider, which isn't
-> yet in `@cendor/sdk` — see the [parity matrix](/docs/languages).
+> **Python only (for now).** The Azure provider itself is in `@cendor/sdk` (above), but keyless
+> **Entra ID token-provider** auth — passing a *refreshing* bearer-token callback as `api_key` — is
+> Python-only. The TS Azure provider takes a string `apiKey` or a pre-built `client`, so hand it a
+> client you refresh yourself. See the [parity matrix](/docs/languages).
 
 <!-- /tabs -->
 
@@ -222,8 +253,19 @@ result = run(agent, "Give me one tip for faster cold starts.")
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The Foundry Local provider isn't yet in `@cendor/sdk` — see the
-> [parity matrix](/docs/languages).
+```ts
+import { Agent, run } from '@cendor/sdk';
+
+// Foundry Local exposes an OpenAI-compatible endpoint; point the provider at it (no key needed).
+// Start the service and resolve the model id with Microsoft's Foundry Local tooling, then:
+const agent = new Agent({
+  name: 'local',
+  model: 'qwen2.5-0.5b-instruct-generic-cpu',   // the resolved model id, not the catalog alias
+  provider: 'foundry_local',
+  baseURL: 'http://localhost:5273',             // or set FOUNDRY_LOCAL_ENDPOINT
+});
+const result = await run(agent, 'Give me one tip for faster cold starts.');
+```
 
 <!-- /tabs -->
 
