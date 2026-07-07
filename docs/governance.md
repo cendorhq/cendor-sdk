@@ -38,7 +38,7 @@ const result = await withBudget({ usd: 0.25, onExceed: 'block' }, () =>
 
 ## Core concepts
 
-### Budgets — `budget`
+### Budgets
 
 A pre-flight budget stops an over-budget call **before it runs**; a post-flight one trips after.
 Pick by intent (the full decision guide is in
@@ -81,7 +81,7 @@ await withBudget({ usd: 0.50, onExceed: 'downgrade', downgrade: { 'gpt-4o': 'gpt
 In multi-agent runs, `Agent(max_usd=...)` caps a single agent's segment
 ([Multi-agent → per-agent budgets](multi-agent.md#per-agent-budgets--attribution)).
 
-### Attribution — `track`
+### Attribution
 
 Tag ambient spend by feature, user, session — anything — and read it back grouped, or assert it
 in a test:
@@ -110,7 +110,7 @@ report(['feature']).assertUnder(0.05, { feature: 'support' });
 
 <!-- /tabs -->
 
-### Audit + redaction — `AuditLog`, `guard`, `Policy`
+### Audit + redaction
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -200,4 +200,7 @@ bare instrumented client, and in both languages:
 - **`guard` redacts what its detectors find.** Regex/pattern detectors plus (Python-only)
   Presidio NER — see [acttrace](/docs/acttrace) for coverage and the
   [parity matrix](/docs/languages) for the language split.
+- **`guard`/interceptors are process-global.** They register on the single in-process event bus,
+  not per-call or per-agent, so in a concurrent server they scope around your whole app rather than
+  one request — install policy once at startup, don't toggle it per request.
 - **Evidence, not compliance.** The audit chain supports a compliance case; it doesn't make one.

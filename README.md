@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/cendor-sdk-banner-dark.png">
+    <img alt="cendor-sdk" src=".github/assets/cendor-sdk-banner-light.png" width="820">
+  </picture>
+</p>
+
 # cendor-sdk — repository
 
 Source for **`cendor-sdk`**, the governed, provider-agnostic agent SDK — the second door into the
@@ -38,7 +45,7 @@ pip install "cendor-sdk[openai,anthropic]"   # or [all] for every provider + int
 
 ## Status — stable
 
-All four phases are shipped, tested offline, and documented; provider coverage and agent
+The full surface is shipped, tested offline, and documented; provider coverage and agent
 capabilities have since been rounded out (streaming, RAG, memory, Hugging Face / Azure AI Foundry /
 Foundry Local). See [CHANGELOG.md](CHANGELOG.md).
 
