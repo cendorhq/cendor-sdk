@@ -106,7 +106,8 @@ Or use a `tokens=` cap (tokens are counted regardless of price), or
 
 Uses `huggingface_hub.InferenceClient.chat_completion` — the response is OpenAI-shaped, and the
 call is attributed to `huggingface`, not `openai`. The `model` is a Hub id or an Inference
-Endpoint URL. Install with `pip install "cendor-sdk[huggingface]"`.
+Endpoint URL. Install with `pip install "cendor-sdk[huggingface]"` (Python); in TypeScript add the
+client peer with `npm i @cendor/sdk @huggingface/inference`.
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -157,7 +158,8 @@ Route through a specific inference provider (e.g. `together`, `fireworks-ai`) wi
 Microsoft's current guidance — the `AzureOpenAI` client and `azure-ai-inference` are being
 retired — is to consume Foundry deployments with the **standard `openai` SDK** pointed at the
 Foundry `/openai/v1/` endpoint. So `provider="azure"` *is* the OpenAI provider with Foundry-aware
-construction. Install with `pip install "cendor-sdk[azure]"` (it just pulls `openai`). Two rules:
+construction. Install with `pip install "cendor-sdk[azure]"` (it just pulls `openai`); in TypeScript
+the Azure path reuses the `openai` peer you already have. Two rules:
 
 1. **`model` is your deployment name**, not the underlying model name (Azure keys on deployment).
 2. **`base_url` is the Foundry endpoint** — `/openai/v1/` is appended for you; also read from
@@ -236,7 +238,8 @@ For an OpenAI-family deployment (`gpt-*`, `o*`) you can drive the **Responses AP
 
 Microsoft **Foundry Local** runs a model on the device and exposes an OpenAI-compatible REST
 server — the local counterpart to Ollama. `provider="foundry_local"` points the OpenAI Chat
-provider at that endpoint; no key needed. Install with `pip install "cendor-sdk[foundry-local]"`.
+provider at that endpoint; no key needed. Install with `pip install "cendor-sdk[foundry-local]"` (Python); in
+TypeScript it uses the same `openai` peer as the OpenAI provider.
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
