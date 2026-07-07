@@ -23,15 +23,15 @@ jobs:
       # cendor-libs is a PRIVATE sibling repo; the default GITHUB_TOKEN cannot read it (404).
       # SIBLING_CHECKOUT_TOKEN must be a PAT with read access to cendorhq/cendor-libs.
       # Drop the `token:` line once cendor-libs is made public.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           repository: cendorhq/cendor-libs
           token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
           path: cendor-libs      # the dev source override in pyproject resolves ../cendor-libs/packages/*
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           path: cendor-sdk
-      - uses: astral-sh/setup-uv@v3
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
       - name: sync
         working-directory: cendor-sdk
         run: uv sync
