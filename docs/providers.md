@@ -206,8 +206,9 @@ const result = await withBudget({ usd: 0.10, onExceed: 'block' }, () =>
 
 <!-- /tabs -->
 
-**Microsoft Entra ID (keyless):** pass a bearer-token provider as `api_key` (the v1 client
-refreshes it), or build the client yourself and hand it to `Agent(client=...)`:
+**Microsoft Entra ID (keyless):** pass a refreshing bearer-token provider — Python takes it as
+`api_key` (the v1 client refreshes it), TypeScript as `azureADTokenProvider` — or build the client
+yourself and hand it to `Agent(client=...)`:
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -223,10 +224,23 @@ agent = Agent(name="foundry", model="my-gpt4o-deployment", provider="azure", cli
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** The Azure provider itself is in `@cendor/sdk` (above), but keyless
-> **Entra ID token-provider** auth — passing a *refreshing* bearer-token callback as `api_key` — is
-> Python-only. The TS Azure provider takes a string `apiKey` or a pre-built `client`, so hand it a
-> client you refresh yourself. See the [parity matrix](/docs/languages).
+```ts
+import { Agent, run } from '@cendor/sdk';
+
+// A refreshing Entra-ID bearer-token provider — e.g. @azure/identity's
+// getBearerTokenProvider(new DefaultAzureCredential(), 'https://cognitiveservices.azure.com/.default')
+const azureADTokenProvider = async () => '<entra-id-bearer-token>';
+
+const agent = new Agent({
+  name: 'foundry',
+  model: 'my-gpt4o-deployment',        // your Foundry DEPLOYMENT name
+  provider: 'azure',
+  baseURL: 'https://my-resource.openai.azure.com',   // or AZURE_OPENAI_ENDPOINT
+  azureADTokenProvider,                 // keyless — the token is refreshed on every request
+});
+
+const result = await run(agent, 'Draft a one-line release note.');
+```
 
 <!-- /tabs -->
 
