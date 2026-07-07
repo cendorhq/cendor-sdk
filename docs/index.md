@@ -5,6 +5,43 @@ governance — budgets, tamper-evident audit, PII redaction, record/replay testi
 foundation, not a plugin. Local-first · no servers · Apache-2.0. Available for
 **Python** (`pip install cendor-sdk`) and **TypeScript/JavaScript** (`npm i @cendor/sdk`).
 
+## A first look
+
+A budget-capped run in both languages — the answer comes back with a real cost receipt, and an
+over-budget call never fires:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, run, budget
+
+agent = Agent(name="assistant", model="gpt-4o", instructions="Be helpful.")
+
+with budget(usd=0.10, on_exceed="block"):        # pre-flight cap — refused if the call would exceed
+    result = run(agent, "Summarize today's standup notes.")
+
+print(result.output, result.cost)                 # the answer + Decimal money, never a float
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, run, withBudget } from '@cendor/sdk';
+
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', instructions: 'Be helpful.' });
+
+const result = await withBudget({ usd: 0.10, onExceed: 'block' }, () =>   // pre-flight cap — refused if it would exceed
+  run(agent, "Summarize today's standup notes."));
+
+console.log(result.output, result.cost?.toString());   // the answer + decimal money, never a float
+```
+
+<!-- /tabs -->
+
+That's one governance layer; [Getting started](getting-started.md) wires up all four — budget,
+audit, PII guard, and record/replay — in ten lines.
+
 ## Which door do I need?
 
 Cendor is *production plumbing for LLM applications*, and there are two front doors into it:
