@@ -99,10 +99,10 @@ Or use a `tokens=` cap (tokens are counted regardless of price), or
 
 ## Hugging Face
 
-> **Now in TypeScript.** The Hugging Face, Azure AI Foundry, and Foundry Local providers below are
-> ported to `@cendor/sdk`. Azure and Foundry Local wrap the standard `openai` client, so cost and
-> usage are captured end-to-end today; Hugging Face parses responses now, with usage capture
-> arriving alongside the matching `@cendor/core` detection. See the [parity matrix](/docs/languages).
+> **TypeScript usage capture.** All three providers below ship in `@cendor/sdk`. Azure AI Foundry
+> and Foundry Local wrap the standard `openai` client, so cost and usage are captured end-to-end in
+> TypeScript today; Hugging Face parses responses now, with token/cost capture arriving alongside the
+> matching `@cendor/core` detection. See the [parity matrix](/docs/languages).
 
 Uses `huggingface_hub.InferenceClient.chat_completion` — the response is OpenAI-shaped, and the
 call is attributed to `huggingface`, not `openai`. The `model` is a Hub id or an Inference

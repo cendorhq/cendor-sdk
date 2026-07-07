@@ -37,8 +37,8 @@ vocabulary, use a framework — and run the [libraries](/docs) beneath it; that'
 
 Python (`pip install cendor-sdk`) and TypeScript/JavaScript (`npm i @cendor/sdk`). Same API
 shapes (`snake_case` ↔ `camelCase`), same defaults, same error names; artifacts (cassettes,
-audit chains) are byte-for-byte interoperable. TS ships OpenAI + Anthropic providers first —
-the full split is in the [parity matrix](/docs/languages).
+audit chains) are byte-for-byte interoperable. All ten provider paths ship in TypeScript — the
+full split (and what stays Python-only) is in the [parity matrix](/docs/languages).
 
 ## Why did my `budget(usd=...)` not stop a run?
 
@@ -66,9 +66,9 @@ an architecture change.
 
 ## Does it work in notebooks / scripts / servers?
 
-All three. `run()` is sync; `run.aio` / `run.astream` are async for servers and notebooks with
-running loops. Nothing spawns background services; state lives in the process (and in whatever
-session/checkpoint files you ask for).
+All three. In Python `run()` is sync, with `run.aio` / `run.astream` for servers and notebooks with
+running loops; in TypeScript everything is async (`run` / `run.stream`). Nothing spawns background
+services; state lives in the process (and in whatever session/checkpoint files you ask for).
 
 ## Where do the numbers on the website come from?
 
