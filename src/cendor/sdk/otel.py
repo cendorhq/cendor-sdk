@@ -1,4 +1,4 @@
-"""Full-run OpenTelemetry span tree for a completed run (plan §7 Phase 3).
+"""Full-run OpenTelemetry span tree for a completed run.
 
 Emits a ``gen_ai.*`` span tree so a whole agent trajectory shows up in Foundry / Datadog / etc.:
 a root ``agent.run`` span, a child span per agent segment, and a grandchild per model call

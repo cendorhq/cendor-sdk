@@ -1,4 +1,4 @@
-"""A2A: expose a governed ``cendor.sdk`` agent over the Agent-to-Agent protocol (plan §7 Phase 3).
+"""A2A: expose a governed ``cendor.sdk`` agent over the Agent-to-Agent protocol.
 
 A minimal, dependency-free implementation of A2A's JSON-RPC ``message/send`` plus the agent card.
 ``A2AServer.handle(request)`` runs the agent and returns an A2A message result (with governance

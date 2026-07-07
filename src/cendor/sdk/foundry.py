@@ -1,4 +1,4 @@
-"""Publish a governed agent as a custom-engine agent for Microsoft 365 / Foundry (plan §7 Phase 3).
+"""Publish a governed agent as a custom-engine agent for Microsoft 365 / Foundry.
 
 A dependency-free adapter over the Bot Framework **Activity** protocol — the messaging surface a
 custom-engine agent exposes to Copilot / Teams / Azure AI Foundry. ``FoundryAdapter.on_activity``

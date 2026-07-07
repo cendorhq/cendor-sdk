@@ -1,8 +1,8 @@
 """Session memory — conversation state carried across ``run()`` calls.
 
-Phase 1 ships an in-memory ``Session``. Phase 2 adds optional local persistence (JSON/SQLite via a
-``Sink``); Phase 4 adds durable, resumable stores. The in-memory shape is the stable base the later
-phases build on.
+An in-memory ``Session`` carries turns within a process; ``save``/``load`` add optional local JSON
+persistence, and ``SQLiteSessionStore`` gives a durable, resumable store keyed by conversation id.
+All local-first — no server, a single file on disk.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ class Session:
 
     Pass the same ``Session`` to successive ``run()`` calls and the agent remembers the prior turns
     (within the process). The stored messages are canonical (OpenAI-shape). ``save``/``load`` give
-    resumable, local-first persistence (no server); Phase 4 adds durable ``Sink``-shaped stores.
+    resumable, local-first persistence (no server); ``SQLiteSessionStore`` is the durable variant.
     """
 
     messages: list[dict] = field(default_factory=list)
@@ -190,7 +190,7 @@ class SummarizingSession(Session):
 
 
 class SQLiteSessionStore:
-    """A durable, local session store (Phase 4): conversations keyed by id in SQLite.
+    """A durable, local session store: conversations keyed by id in SQLite.
 
     Local-first — a single file on disk, no server. Use it to persist and resume many named
     conversations across processes.

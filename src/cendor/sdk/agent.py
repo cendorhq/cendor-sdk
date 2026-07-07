@@ -39,7 +39,7 @@ class Agent:
         retriever: Optional ``query -> list[str]`` callable (e.g. ``VectorIndex.as_retriever()``).
             When set, context is retrieved for the run's query and injected as a system message
             before the call — "always-on" RAG. (For agentic retrieval, expose it as a tool instead.)
-        handoffs: Names of peer agents this agent may transfer to (Phase 2).
+        handoffs: Names of peer agents this agent may transfer to.
         api_key / base_url / client: Optional client config, or an explicit instrumented client.
     """
 
@@ -57,8 +57,8 @@ class Agent:
     extra: dict[str, Any] = field(default_factory=dict)
     retriever: Any = None  # Callable[[str], list[str]] — injected as context when set (RAG)
     handoffs: list[Any] = field(default_factory=list)
-    max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator, Phase 2)
-    api_key: str | None = None
+    max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator)
+    api_key: str | None = field(default=None, repr=False)  # never surface a key in repr()
     base_url: str | None = None
     client: Any = None
 

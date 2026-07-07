@@ -1,4 +1,4 @@
-"""Human-in-the-loop: gate a tool behind human approval, recorded in the audit chain (plan §7 P3).
+"""Human-in-the-loop: gate a tool behind human approval, recorded in the audit chain.
 
 ``acttrace`` records *that* oversight happened; the pause/approve/resume is the application's job.
 ``require_approval`` wraps a tool so that, before it runs, an ``approver`` callback is consulted

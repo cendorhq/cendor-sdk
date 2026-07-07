@@ -1,4 +1,4 @@
-"""Checkpointed / resumable runs — local-first (plan §7 Phase 4).
+"""Checkpointed / resumable runs — local-first.
 
 A ``Checkpointer`` persists a run's conversation to a local JSON file after each turn, so a long
 agent can resume after a crash or restart without re-doing completed work (already-run tools are in

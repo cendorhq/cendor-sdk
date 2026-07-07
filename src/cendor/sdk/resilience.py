@@ -1,4 +1,4 @@
-"""Resilience: retries with exponential backoff around the model call (plan §7 Phase 4).
+"""Resilience: retries with exponential backoff around the model call.
 
 A small, provider-agnostic retry policy applied to the model call in the loop. It retries only
 *transient* failures (timeouts, connection errors, rate limits, 5xx) and **never** retries a

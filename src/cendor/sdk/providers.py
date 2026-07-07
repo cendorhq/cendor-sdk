@@ -8,7 +8,7 @@ history; each provider translates canonical → its wire format at call time.
 
 Normalization is implemented for OpenAI (Chat Completions + Responses), Anthropic, Gemini, Bedrock,
 Ollama, Hugging Face, Azure AI Foundry (Chat Completions + Responses), and Foundry Local. Client
-construction ships for OpenAI + Anthropic (Phase 1); the others construct behind lazy imports via
+construction ships for OpenAI + Anthropic; the others construct behind lazy imports via
 their extras.
 
 Hugging Face (``huggingface_hub``) and Azure AI Foundry both speak the OpenAI Chat Completions

@@ -1,4 +1,4 @@
-"""Governed eval / regression harness (plan §7 Phase 4) — the testing wedge fully realized.
+"""Governed eval / regression harness — the testing wedge fully realized.
 
 Replay recorded agent trajectories (cassettes) as **tests** and assert they don't regress: the
 output, the **tool sequence**, and **cost/token ceilings**. Because cassette replay re-emits the

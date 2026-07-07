@@ -1,4 +1,4 @@
-"""Multi-agent orchestration: handoff, supervisor/router, sequential & parallel (plan §7 Phase 2).
+"""Multi-agent orchestration: handoff, supervisor/router, sequential & parallel.
 
 The correlation that was *impossible beneath frameworks* is first-class here. A multi-agent run
 gets one parent ``run_id``; each agent segment runs under a nested child trace id
