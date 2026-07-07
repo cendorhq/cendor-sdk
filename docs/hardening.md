@@ -40,9 +40,6 @@ so usage and cost are never double-counted.
 
 ### Checkpointed & resumable runs
 
-> **Now in TypeScript.** `checkpoint` is ported to `@cendor/sdk` (a path or a `Checkpointer`),
-> alongside durable memory via `SqliteSessionStore` (below). See the [parity matrix](/docs/languages).
-
 Pass `checkpoint=` (a path or a `Checkpointer`) and the run persists its conversation after each
 turn. If the process crashes, calling `run` again with the same checkpoint **resumes** from the
 saved state — completed tools are in the saved messages and are **not** re-executed:

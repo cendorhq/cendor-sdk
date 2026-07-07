@@ -8,10 +8,6 @@ OpenTelemetry is installed and configured.
 
 ## MCP — consume Model Context Protocol tools
 
-> **Now in TypeScript.** MCP tool loading, A2A, and the Foundry adapter are ported to `@cendor/sdk`,
-> alongside the OpenTelemetry span tree and human-in-the-loop sections below. See the
-> [parity matrix](/docs/languages).
-
 `load_mcp_tools(session)` turns an MCP server's tools into governed `Tool`s (the schema comes
 from the server). MCP is async, so use them with `run.aio(...)`. Install the client with
 `pip install "cendor-sdk[mcp]"`.
