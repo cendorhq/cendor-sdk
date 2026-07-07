@@ -24,6 +24,10 @@ Normalization is isolated in `providers.py` with per-provider fixtures, so respo
 is contained. In TypeScript, OpenAI (Chat + Responses) and Anthropic ship first, with the same
 `Provider` seam for the rest — see the [parity matrix](/docs/languages).
 
+**Async (`run.aio`)** runs natively for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging
+Face. Google Gemini and AWS Bedrock have no native async client in their SDKs, so `run.aio` executes
+them synchronously for now — correct results, but without a concurrency benefit.
+
 ## Core concepts
 
 ### Provider inference — and when to be explicit

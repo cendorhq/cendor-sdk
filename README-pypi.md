@@ -2,7 +2,7 @@
 
 **A governed agent in 10 lines — cost budgets, tamper-evident audit, and PII redaction built in.**
 
-![version](https://img.shields.io/badge/version-1.0.1-blue) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue)
+![PyPI](https://img.shields.io/pypi/v/cendor-sdk) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue)
 
 *provider-agnostic · local-first · offline by default · sync **and** async*
 
@@ -60,6 +60,9 @@ from cendor.sdk import Agent, run
 result = run(Agent(name="a", model="gpt-4o", instructions="Be brief."), "Hi")
 result = await run.aio(agent, "Hi")   # same call, async
 ```
+
+> `run.aio` is natively async for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging Face.
+> Gemini and Bedrock have no native async client, so `run.aio` runs them synchronously for now.
 
 ## Why it's different
 
@@ -123,7 +126,7 @@ Everything a real agent needs — all governed through the same seams:
 
 ## Docs
 
-- [Quickstart & reference](https://github.com/cendorhq/cendor-sdk/blob/main/docs/sdk.md)
+- [Quickstart & reference](https://github.com/cendorhq/cendor-sdk/blob/main/docs/getting-started.md)
 - [Multi-agent orchestration](https://github.com/cendorhq/cendor-sdk/blob/main/docs/multi-agent.md)
 - [Interop — MCP, A2A, Foundry, OTel, HITL](https://github.com/cendorhq/cendor-sdk/blob/main/docs/interop.md)
 - [Production hardening](https://github.com/cendorhq/cendor-sdk/blob/main/docs/hardening.md) · [Governed eval](https://github.com/cendorhq/cendor-sdk/blob/main/docs/eval.md)

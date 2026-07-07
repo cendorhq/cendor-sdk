@@ -162,3 +162,7 @@ replays a whole RAG trajectory — retrieval included — offline in CI.
   crowd out the conversation.
 - **Retrieval quality is yours.** Chunking, ranking, and freshness live in your store; the SDK
   governs the calls, it doesn't tune them.
+- **Always-on retrieval injects passages as a *system* message.** Retrieved text enters with
+  system-role trust, so if your corpus holds untrusted or user-submitted content, treat it as a
+  prompt-injection surface — sanitize it, or expose retrieval as a tool (agentic RAG) so passages
+  arrive with tool-role trust instead.
