@@ -125,12 +125,26 @@ const result = await run(agent, 'Hello');   // TS is async throughout
 Record the run once; replay it offline forever — deterministic, no network, no keys. Cost and
 tokens are **real on replay**, so tests can assert spend too:
 
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
 ```python
 from cendor import cassette
 
 with cassette.using("tests/fixtures/run.json"):   # records on first run, replays after
     result = run(agent, "What's the weather in Paris?")
 ```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { using } from '@cendor/cassette';
+
+const result = await using('tests/fixtures/run.json', () =>   // records once, replays after
+  run(agent, "What's the weather in Paris?"));
+```
+
+<!-- /tabs -->
 
 This is the foundation of the [eval harness](eval.md), which turns recorded trajectories into CI
 regression tests.

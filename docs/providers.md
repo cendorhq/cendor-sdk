@@ -20,9 +20,11 @@ governance don't change.
 | Azure AI Foundry (Responses) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
 | Foundry Local (on-device) | `[foundry-local]` | ✅ (OpenAI-shape) | ✅ functions |
 
-Normalization is isolated in `providers.py` with per-provider fixtures, so response-shape drift
-is contained. In TypeScript, OpenAI (Chat + Responses) and Anthropic ship first, with the same
-`Provider` seam for the rest — see the [parity matrix](/docs/languages).
+Normalization is isolated in `providers.py` (Python) / `providers.ts` (TypeScript) with
+per-provider fixtures, so response-shape drift is contained. **All ten paths ship in `@cendor/sdk`**
+behind the same `Provider` seam — Hugging Face, Ollama, Gemini, and Bedrock drive the model today,
+with their end-to-end token/cost capture in JS activating alongside the matching `@cendor/core`
+detection release. See the [parity matrix](/docs/languages).
 
 **Async (`run.aio`)** runs natively for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging
 Face. Google Gemini and AWS Bedrock have no native async client in their SDKs, so `run.aio` executes
@@ -293,5 +295,6 @@ counting, price sources, OTel ingestion — live in the library docs:
   Hub/deployment names, and guessing wrong would mis-attribute cost.
 - **Deployment-name models start unpriced** — register a rate or budgets can't bind
   ([above](#pricing-unpriced-models)).
-- **TypeScript ships OpenAI + Anthropic first.** The seam is identical; the remaining providers
-  land per the [parity matrix](/docs/languages).
+- **TypeScript ships all ten provider paths** behind the same seam. Hugging Face / Ollama /
+  Gemini / Bedrock drive the model today; their end-to-end usage capture in JS lands with the
+  matching `@cendor/core` detection release — see the [parity matrix](/docs/languages).
