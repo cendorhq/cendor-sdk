@@ -1,4 +1,4 @@
-"""MCP client: consume Model Context Protocol tools as ``cendor.sdk`` ``Tool``s (plan §7 Phase 3).
+"""MCP client: consume Model Context Protocol tools as ``cendor.sdk`` ``Tool``s.
 
 The integration is duck-typed against an MCP *client session* — any object exposing async
 ``list_tools()`` and ``call_tool(name, arguments)`` (the shape of ``mcp.ClientSession``). That keeps

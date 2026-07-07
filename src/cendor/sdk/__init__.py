@@ -94,14 +94,14 @@ __all__ = [
     "aembed",
     "VectorIndex",
     "Hit",
-    # orchestration (Phase 2)
+    # orchestration
     "handoff",
     "Handoff",
     "sequential",
     "parallel",
     "parallel_async",
     "supervisor",
-    # interop (Phase 3)
+    # interop
     "load_mcp_tools",
     "load_mcp_prompts",
     "get_mcp_prompt",
@@ -112,7 +112,7 @@ __all__ = [
     "span_tree",
     "live_spans",
     "require_approval",
-    # hardening + eval (Phase 4)
+    # hardening + eval
     "RetryPolicy",
     "Checkpointer",
     "SQLiteSessionStore",
