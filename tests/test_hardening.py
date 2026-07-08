@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -151,6 +152,69 @@ def test_checkpointed_run_resumes_after_crash(tmp_path):
     assert _tool_runs["n"] == 1  # the tool was NOT re-run on resume (loaded from the checkpoint)
     # the resumed conversation carried the earlier tool result
     assert any(m.get("role") == "tool" for m in result.messages)
+
+
+# ------------------------------------------------------ resuming a FINISHED (done) checkpoint
+#
+# Regression: a done checkpoint was consulted only by the resume-from helper, which returned None
+# on done → the caller treated it as "no checkpoint" and re-ran the whole loop (model + tools).
+# A finished run must now short-circuit to the stored output with zero model/tool calls.
+
+
+def _finished_ckpt(tmp_path, output):
+    path = tmp_path / "done.ckpt.json"
+    path.write_text(
+        json.dumps(
+            {
+                "run_id": "r1",
+                "messages": [
+                    {"role": "user", "content": "weather in Paris?"},
+                    {"role": "assistant", "content": output},
+                ],
+                "done": True,
+                "output": output,
+            }
+        )
+    )
+    return str(path)
+
+
+def test_finished_checkpoint_resume_does_not_rerun(tmp_path):
+    """Resuming a done checkpoint returns the stored output without re-invoking model or tools."""
+    path = _finished_ckpt(tmp_path, "It's sunny in Paris.")
+    _tool_runs["n"] = 0
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("SHOULD NOT BE CALLED")
+
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], client=_stub(create))
+    result = run(agent, "weather in Paris?", checkpoint=path)
+
+    assert result.output == "It's sunny in Paris."
+    assert model_calls["n"] == 0  # 0 model calls on a finished-run resume
+    assert _tool_runs["n"] == 0  # 0 tool invocations
+    assert result.steps == []  # no bus events on a resume
+
+
+async def test_finished_checkpoint_resume_does_not_rerun_async(tmp_path):
+    """Same short-circuit on the async single-agent path."""
+    path = _finished_ckpt(tmp_path, "It's sunny in Paris.")
+    _tool_runs["n"] = 0
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("SHOULD NOT BE CALLED")
+
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], client=_stub(create))
+    result = await run.aio(agent, "weather in Paris?", checkpoint=path)
+
+    assert result.output == "It's sunny in Paris."
+    assert model_calls["n"] == 0
+    assert _tool_runs["n"] == 0
+    assert result.steps == []
 
 
 # --------------------------------------------------------------------------- durable memory

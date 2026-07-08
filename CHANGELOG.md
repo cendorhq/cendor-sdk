@@ -4,6 +4,20 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-07-08
+
+### Fixed
+- **`Agent(max_usd=…)` is now enforced on a single-agent `run()`**, not only in orchestrated/
+  multi-agent runs. The per-agent USD cap was previously applied only inside the orchestrator's
+  per-segment scope, so a plain `run(agent, …)` billed with no ceiling. The single-agent run and
+  stream paths (sync + async) now wrap the same pre-flight `budget(on_exceed="block")` scope the
+  orchestrator uses, so an over-budget call is refused before it is sent — identical semantics to a
+  multi-agent segment.
+- **Resuming an already-completed checkpoint no longer re-runs the model or its tools.** Resuming a
+  run whose checkpoint is marked `done` now short-circuits and returns the stored result
+  (`steps == []`, zero model calls, zero tool calls) instead of rebuilding from the original input and
+  replaying the whole loop. Applies to single- and multi-agent runs, sync and async.
+
 ## [1.1.0] — 2026-07-05
 
 ### Added

@@ -41,6 +41,17 @@ class Checkpointer:
             return list(state.get("messages") or [])
         return None
 
+    def finished(self) -> dict[str, Any] | None:
+        """The full saved state iff it is a finished (``done``) run, else ``None``.
+
+        Callers early-return a completed ``Result`` from this stored ``{output, messages}`` — so
+        resuming an already-finished run re-invokes neither the model nor any tool.
+        """
+        state = self.load()
+        if state and state.get("done"):
+            return state
+        return None
+
     def clear(self) -> None:
         """Delete the checkpoint file (e.g. after a successful, finished run)."""
         try:

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from cendor.core import bus, trace
 from cendor.core.types import LLMCall, ToolCall
 
+from ._governance import _scope
 from .providers import assistant_message, tool_result_message
 from .resilience import RetryPolicy, acall_with_retry, call_with_retry
 from .result import Result, RunComplete, Step, TextDelta, ToolCallEvent, ToolResultEvent
@@ -464,6 +465,23 @@ class Runner:
 
         return messages, run_id, (on_turn if self.checkpoint is not None else None)
 
+    def _resumed_result(self, state: dict) -> Result:
+        """Reconstruct a completed :class:`Result` from a finished (``done``) checkpoint.
+
+        No run is minted and the loop is never entered, so the model and tools are not re-invoked;
+        ``steps`` is empty (there are no bus events on a resume). The stored ``output`` is parsed
+        to the agent's ``output_type`` for typed results.
+        """
+        output = state.get("output")
+        return Result(
+            output=_parse_output(output, self.agent.output_type),
+            steps=[],
+            trace_id=state.get("run_id") or "",
+            agents=[self.agent.name],
+            messages=list(state.get("messages") or []),
+            incomplete=output is None,
+        )
+
     def _finish(self, run_id: str, output: Any, steps: list, messages: list[dict]) -> Result:
         if self.session is not None:
             self.session.replace(messages)
@@ -481,31 +499,39 @@ class Runner:
         )
 
     def run(self, input: Any) -> Result:
+        done = self.checkpoint.finished() if self.checkpoint else None
+        if done is not None:  # already finished — return the stored Result, don't re-run the loop
+            return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
-        output, steps, _ = run_agent_sync(
-            self.agent,
-            messages,
-            run_id,
-            audit=self.audit,
-            max_turns=self.max_turns,
-            retry=self.retry,
-            on_turn=on_turn,
-            on_step=self.on_step,
-        )
+        with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
+            output, steps, _ = run_agent_sync(
+                self.agent,
+                messages,
+                run_id,
+                audit=self.audit,
+                max_turns=self.max_turns,
+                retry=self.retry,
+                on_turn=on_turn,
+                on_step=self.on_step,
+            )
         return self._finish(run_id, output, steps, messages)
 
     async def run_async(self, input: Any) -> Result:
+        done = self.checkpoint.finished() if self.checkpoint else None
+        if done is not None:  # already finished — return the stored Result, don't re-run the loop
+            return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
-        output, steps, _ = await run_agent_async(
-            self.agent,
-            messages,
-            run_id,
-            audit=self.audit,
-            max_turns=self.max_turns,
-            retry=self.retry,
-            on_turn=on_turn,
-            on_step=self.on_step,
-        )
+        with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
+            output, steps, _ = await run_agent_async(
+                self.agent,
+                messages,
+                run_id,
+                audit=self.audit,
+                max_turns=self.max_turns,
+                retry=self.retry,
+                on_turn=on_turn,
+                on_step=self.on_step,
+            )
         return self._finish(run_id, output, steps, messages)
 
 
@@ -533,7 +559,12 @@ def stream_agent_sync(
     turns = max_turns or agent.max_turns
     output: Any = None
 
-    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+    with (
+        _scope(agent),  # attribute spend + enforce agent.max_usd (pre-flight block)
+        _collector(run_id) as events,
+        trace(run_id),
+        _decision(audit, agent, messages, run_id),
+    ):
         for _turn in range(turns):
             wire = _assemble(agent, messages)
             kwargs = provider.build_kwargs(
@@ -606,7 +637,12 @@ async def stream_agent_async(
     turns = max_turns or agent.max_turns
     output: Any = None
 
-    with _collector(run_id) as events, trace(run_id), _decision(audit, agent, messages, run_id):
+    with (
+        _scope(agent),  # attribute spend + enforce agent.max_usd (pre-flight block)
+        _collector(run_id) as events,
+        trace(run_id),
+        _decision(audit, agent, messages, run_id),
+    ):
         for _turn in range(turns):
             wire = _assemble(agent, messages)
             kwargs = provider.build_kwargs(
@@ -673,7 +709,7 @@ def stream_agents_sync(
     """Stream a **multi-agent** (handoff) run as events; one terminal ``RunComplete`` carries the
     aggregate ``Result``. Mirrors :func:`run_agents`' segment loop, streaming each active agent's
     turns and switching when it calls a ``transfer_to_<peer>`` tool."""
-    from .orchestration import _effective, _scope
+    from .orchestration import _effective
 
     registry = {a.name: a for a in agents}
     parent = uuid.uuid4().hex
@@ -769,7 +805,7 @@ async def stream_agents_async(
     max_turns: int | None = None,
 ) -> Any:
     """Async counterpart of :func:`stream_agents_sync` (``async for`` over the events)."""
-    from .orchestration import _effective, _scope
+    from .orchestration import _effective
 
     registry = {a.name: a for a in agents}
     parent = uuid.uuid4().hex

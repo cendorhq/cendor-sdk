@@ -92,3 +92,39 @@ def test_downgrade_reroutes_to_cheaper_model(build):
         with budget(usd=0.0001, on_exceed="downgrade", downgrade={"gpt-4o": "gpt-4o-mini"}):
             result = run(agent, "hello")
     assert result.llm_steps[0].call.model == "gpt-4o-mini"
+
+
+# --------------------------------------------------------------------------- Agent.max_usd cap
+#
+# Regression: Agent.max_usd was enforced only inside the multi-agent orchestrator; a single-agent
+# run() / run.aio() / run.stream() billed with no cap. It is now a pre-flight ceiling on every path.
+
+
+def test_agent_max_usd_blocks_single_agent_run(build):
+    """Agent.max_usd is a pre-flight ceiling on a single-agent run() — the provider is never hit."""
+    agent = Agent(name="a", model="gpt-4o", instructions="Be brief.", max_usd=0.0000001)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        with pytest.raises(BudgetExceeded):
+            run(agent, "hello")
+        assert route.call_count == 0  # blocked pre-flight (was silently ignored before the fix)
+
+
+async def test_agent_max_usd_blocks_single_agent_run_async(build):
+    """The cap is enforced on the async single-agent path too."""
+    agent = Agent(name="a", model="gpt-4o", instructions="Be brief.", max_usd=0.0000001)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        with pytest.raises(BudgetExceeded):
+            await run.aio(agent, "hello")
+        assert route.call_count == 0
+
+
+def test_agent_max_usd_blocks_single_agent_stream(build):
+    """The cap is enforced on the single-agent streaming path too."""
+    agent = Agent(name="a", model="gpt-4o", instructions="Be brief.", max_usd=0.0000001)
+    with respx.mock(assert_all_called=False) as mock:
+        route = mock.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        with pytest.raises(BudgetExceeded):
+            list(run.stream(agent, "hello"))
+        assert route.call_count == 0

@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import asyncio
 import uuid
-from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from typing import Any
 
+from ._governance import _scope
 from .agent import Agent
 from .result import Result
 from .runner import _parse_output, _prepare_messages, run_agent_async, run_agent_sync
@@ -82,23 +82,31 @@ def _effective(agent: Agent, registry: dict[str, Agent]) -> tuple[list[Tool], di
     return tools, tool_map, transfer_map
 
 
-@contextmanager
-def _scope(agent: Agent) -> Any:
-    """Per-agent governance: attribute spend to the agent + enforce its ``max_usd`` cap if set."""
-    from cendor.tokenguard import budget, track
-
-    with ExitStack() as stack:
-        stack.enter_context(track(agent=agent.name))
-        if agent.max_usd is not None:
-            stack.enter_context(budget(usd=agent.max_usd, on_exceed="block"))
-        yield
-
-
 def _user_message(value: Any) -> dict:
     return {"role": "user", "content": value if isinstance(value, str) else str(value)}
 
 
 # --------------------------------------------------------------------------- handoff / supervisor
+
+
+def _finished_result(state: dict, agents: list[Agent]) -> Result:
+    """Reconstruct the completed ``Result`` from a finished (``done``) checkpoint.
+
+    Resuming an already-finished run must not re-enter the loop or mint a run — no model or tool
+    call happens. ``steps`` is empty (there are no bus events on a resume); the stored ``output``
+    is parsed to the active agent's ``output_type`` for typed results.
+    """
+    registry = {a.name: a for a in agents}
+    active = registry.get(state.get("active"), agents[0])
+    output = state.get("output")
+    return Result(
+        output=_parse_output(output, active.output_type),
+        steps=[],
+        trace_id=state.get("run_id") or "",
+        agents=list(state.get("seen") or [a.name for a in agents]),
+        messages=list(state.get("messages") or []),
+        incomplete=output is None,
+    )
 
 
 def _resume_state(ckpt: Any, agents: list[Agent], input: Any, session: Any) -> tuple:
@@ -136,6 +144,10 @@ def run_agents(
     from .checkpoint import _as_checkpointer
 
     ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — return the stored Result, don't re-run the loop
+            return _finished_result(done, agents)
     registry = {a.name: a for a in agents}
     parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
@@ -210,6 +222,10 @@ async def run_agents_async(
     from .checkpoint import _as_checkpointer
 
     ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — return the stored Result, don't re-run the loop
+            return _finished_result(done, agents)
     registry = {a.name: a for a in agents}
     parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
