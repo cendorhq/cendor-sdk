@@ -97,7 +97,7 @@ def _finished_result(state: dict, agents: list[Agent]) -> Result:
     is parsed to the active agent's ``output_type`` for typed results.
     """
     registry = {a.name: a for a in agents}
-    active = registry.get(state.get("active"), agents[0])
+    active = registry.get(state.get("active") or "", agents[0])
     output = state.get("output")
     return Result(
         output=_parse_output(output, active.output_type),
