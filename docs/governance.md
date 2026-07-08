@@ -78,7 +78,8 @@ await withBudget({ usd: 0.50, onExceed: 'downgrade', downgrade: { 'gpt-4o': 'gpt
 <!-- /tabs -->
 
 `BudgetExceeded` is raised on block/raise. Budgets stack — the innermost cap is enforced first.
-In multi-agent runs, `Agent(max_usd=...)` caps a single agent's segment
+`Agent(max_usd=...)` caps that agent's spend pre-flight (`block` semantics) on **every** run — a
+plain `run(agent, ...)` as well as a single agent's segment in a multi-agent team
 ([Multi-agent → per-agent budgets](multi-agent.md#per-agent-budgets--attribution)).
 
 ### Attribution
