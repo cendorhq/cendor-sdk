@@ -16,7 +16,7 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 *provider-agnostic · local-first · offline by default · sync **and** async*
 
 > **The second door into Cendor.** One brand, two doors: compose the
-> [six libraries](https://github.com/cendorhq/cendor-libs) beneath *your* framework, or take the whole
+> [seven libraries](https://github.com/cendorhq/cendor-libs) beneath *your* framework, or take the whole
 > loop — governed — with this SDK. The `budget` / `guard` / `Policy` / `AuditLog` / `trace` you import
 > here are the **real** library objects, re-exported for one-import convenience.
 
@@ -95,7 +95,7 @@ Both doors expose the **same primitives** — start on the SDK and drop down to 
 graph TD
     APP["your application"]
     SDK["cendor-sdk<br/>Agent · tool · run"]
-    LIBS["the six libraries<br/>contextkit · squeeze · tokenguard · cassette · acttrace"]
+    LIBS["the seven libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
     CORE["cendor-core<br/>instrument() seam + event bus"]
     PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
 
