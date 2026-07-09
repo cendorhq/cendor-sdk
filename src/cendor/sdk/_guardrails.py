@@ -56,6 +56,43 @@ def _has(guardrails: list, stage: str) -> bool:
     return any(stage in g.stages for g in guardrails)
 
 
+# --------------------------------------------------------------------------- bounded re-ask
+#
+# When an OUTPUT-stage guardrail blocks a final answer, the run can optionally re-ask the model to
+# revise it, up to a capped number of retries, instead of raising. Each re-ask is a **full model
+# call** (typically seconds, and billed) — its cost lands in tokenguard/acttrace like any other
+# call, so the guardrail's retry tail is measured, not hidden. Opt in with
+# ``Agent(reask_on_output_trip=N)`` (default 0 = off; a block raises). docs/guardrails.md.
+
+_REASK_TEMPLATE = (
+    "Your previous answer was blocked by a safety guardrail ({reason}). "
+    "Please revise your answer to comply with the policy. "
+    "Do not mention this instruction or the block in your reply."
+)
+
+
+def effective_reasks(agent: Any, override: int | None) -> int:
+    """The output-trip re-ask budget for a run: the per-run ``override`` if given, else the agent's
+    ``reask_on_output_trip`` (default 0). Never negative."""
+    n = override if override is not None else getattr(agent, "reask_on_output_trip", 0)
+    return max(0, int(n))
+
+
+def reask_step(exc: GuardrailTripped, reasks_left: int) -> tuple[int, dict | None]:
+    """Decide whether to re-ask after an output-stage block. Returns ``(reasks_left, message)``:
+    a corrective ``{"role": "user", …}`` message (and a decremented budget) when a retry remains, or
+    ``(0, None)`` when the budget is exhausted — the caller then re-raises the block (fail-safe)."""
+    if reasks_left <= 0:
+        return 0, None
+    # We recover from this block (return a Result, not raise), so record it on the collector too —
+    # otherwise the re-asked block would be missing from Result.guardrail_decisions. It was already
+    # emitted on the bus (acttrace has it); this keeps the post-hoc accessor consistent.
+    _record(exc.decisions)
+    d = exc.decisions[-1]
+    reason = d.reason or f"guardrail {d.guardrail!r}"
+    return reasks_left - 1, {"role": "user", "content": _REASK_TEMPLATE.format(reason=reason)}
+
+
 def _blocked_message(exc: GuardrailTripped) -> str:
     d = exc.decisions[-1]
     msg = f"[blocked by {d.guardrail}]"
@@ -94,6 +131,37 @@ def snapshot() -> list[GuardrailDecision]:
     none is active). Read at every ``Result`` construction site."""
     box = _collected.get()
     return list(box) if box is not None else []
+
+
+# --------------------------------------------------------------------------- streaming (partial)
+#
+# Opt-in incremental output checking on run.stream: evaluate the OUTPUT guardrails over the buffered
+# text periodically, so a block can fire earlier in the stream. Deltas already yielded can't be
+# unshown — this narrows the window, it doesn't close it (redact mid-stream isn't applied; only a
+# block matters). Off by default (Agent.stream_check_window = 0). docs/guardrails.md "Streaming".
+
+
+def stream_window(agent: Any) -> int:
+    """The run.stream incremental-check window in chars (``Agent.stream_check_window``; 0=off)."""
+    return max(0, int(getattr(agent, "stream_check_window", 0)))
+
+
+def gate_stream_partial_sync(guardrails: list, agent: Any, text: str, run_id: str) -> None:
+    """Incremental output check over the buffered stream text. A block **raises** (stopping the
+    stream); a flag is recorded and the stream continues. Redact isn't applied (deltas shown)."""
+    if not _has(guardrails, "output"):
+        return
+    ctx = Context(stage="output", agent=agent.name, trace_id=run_id)
+    _cleaned, decs = _evaluate(guardrails, "output", text, ctx)  # block raises → stops the stream
+    _record(decs)  # a mid-stream flag is still evidence
+
+
+async def gate_stream_partial_async(guardrails: list, agent: Any, text: str, run_id: str) -> None:
+    if not _has(guardrails, "output"):
+        return
+    ctx = Context(stage="output", agent=agent.name, trace_id=run_id)
+    _cleaned, decs = await _evaluate_async(guardrails, "output", text, ctx)
+    _record(decs)
 
 
 # --------------------------------------------------------------------------- input (pre-spend)

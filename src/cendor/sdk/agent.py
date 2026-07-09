@@ -51,6 +51,17 @@ class Agent:
             call (a block is pre-spend, ``$0``); ``"parallel"`` overlaps them with the first call
             for lower latency on the pass path — worthwhile only for slow tier-3/4 checks (an LLM
             judge, a hosted rail), and async-only. See ``run.aio`` and docs/guardrails.md.
+        reask_on_output_trip: When an ``output``-stage guardrail **blocks** the final answer, re-ask
+            the model to revise it up to this many times instead of raising (default ``0`` = off; a
+            block raises immediately). Each re-ask is a full model call — seconds, and billed; its
+            cost lands in tokenguard/acttrace like any other call. Bounded by both this cap and
+            ``max_turns``; if every re-ask still trips, the block raises (fail-closed).
+            Non-streaming only. See docs/guardrails.md "Bounded re-ask".
+        stream_check_window: On ``run.stream``, also evaluate the ``output`` guardrails on the
+            **buffered** text every this-many characters (default ``0`` = off; only the final text
+            is checked). A block then raises *earlier* in the stream — but deltas already yielded
+            can't be unshown, so this narrows the window, it doesn't close it (redact mid-stream is
+            not applied). Single-agent ``run.stream`` only. See docs/guardrails.md "Streaming".
         api_key / base_url / client: Optional client config, or an explicit instrumented client.
     """
 
@@ -70,6 +81,8 @@ class Agent:
     handoffs: list[Any] = field(default_factory=list)
     guardrails: list[Any] = field(default_factory=list)  # cendor.guardrails.Guardrail — the gate
     guardrail_mode: str = "blocking"  # "blocking" | "parallel" (input-stage overlap; async-only)
+    reask_on_output_trip: int = 0  # re-ask N times on an output block (0=off, non-streaming)
+    stream_check_window: int = 0  # run.stream: check output every N chars (0=off, final-text only)
     max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator)
     api_key: str | None = field(default=None, repr=False)  # never surface a key in repr()
     base_url: str | None = None

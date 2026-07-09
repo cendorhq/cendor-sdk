@@ -297,6 +297,7 @@ def run_agent_sync(
         _decision(audit, agent, messages, run_id),
     ):
         _gr.gate_input_sync(gl, agent, messages, run_id)  # pre-spend: block raises, redact rewrites
+        reasks_left = _gr.effective_reasks(agent, None)
         for _turn in range(turns):
             wire = _assemble(agent, messages)
             kwargs = provider.build_kwargs(
@@ -326,7 +327,16 @@ def run_agent_sync(
                 if switched:
                     break
                 continue
-            output = _gr.gate_output_sync(gl, agent, parsed.content, run_id)  # block raises
+            try:
+                output = _gr.gate_output_sync(gl, agent, parsed.content, run_id)  # block raises
+            except _gr.GuardrailTripped as exc:  # opt-in bounded re-ask on an output block
+                reasks_left, corrective = _gr.reask_step(exc, reasks_left)
+                if corrective is None:
+                    raise
+                messages.append(corrective)
+                if on_turn is not None:
+                    on_turn(messages)
+                continue
             if on_turn is not None:
                 on_turn(messages)
             break
@@ -380,6 +390,7 @@ async def run_agent_async(
             gate_task = _gr.start_input_gate_async(gl, agent, messages, run_id)
         else:
             await _gr.gate_input_async(gl, agent, messages, run_id)  # pre-spend: block / redact
+        reasks_left = _gr.effective_reasks(agent, None)
         try:
             for _turn in range(turns):
                 wire = _assemble(agent, messages)
@@ -421,7 +432,16 @@ async def run_agent_async(
                     if switched:
                         break
                     continue
-                output = await _gr.gate_output_async(gl, agent, parsed.content, run_id)  # block
+                try:
+                    output = await _gr.gate_output_async(gl, agent, parsed.content, run_id)  # block
+                except _gr.GuardrailTripped as exc:  # opt-in bounded re-ask on an output block
+                    reasks_left, corrective = _gr.reask_step(exc, reasks_left)
+                    if corrective is None:
+                        raise
+                    messages.append(corrective)
+                    if on_turn is not None:
+                        on_turn(messages)
+                    continue
                 if on_turn is not None:
                     on_turn(messages)
                 break
@@ -658,11 +678,19 @@ def stream_agent_sync(
                 kwargs = provider.apply_cache(kwargs)
             if provider.supports_stream:
                 chunks: list = []
+                window = _gr.stream_window(agent)  # opt-in incremental output check (0 = off)
+                buffered, checked = "", 0
                 for chunk in create(**{**kwargs, "stream": True}):
                     chunks.append(chunk)
                     delta = provider.stream_text(chunk)
                     if delta:
                         yield TextDelta(delta)
+                        if window:
+                            buffered += delta
+                            if len(buffered) - checked >= window:
+                                # a block raises mid-stream; already-yielded deltas can't be unshown
+                                _gr.gate_stream_partial_sync(gl, agent, buffered, run_id)
+                                checked = len(buffered)
                 parsed = provider.parse_stream(chunks)
             else:  # provider has no reassembler → one whole-response delta
                 parsed = provider.parse(create(**kwargs))
@@ -741,12 +769,20 @@ async def stream_agent_async(
                 kwargs = provider.apply_cache(kwargs)
             if provider.supports_stream:
                 chunks = []
+                window = _gr.stream_window(agent)  # opt-in incremental output check (0 = off)
+                buffered, checked = "", 0
                 stream = await create(**{**kwargs, "stream": True})
                 async for chunk in stream:
                     chunks.append(chunk)
                     delta = provider.stream_text(chunk)
                     if delta:
                         yield TextDelta(delta)
+                        if window:
+                            buffered += delta
+                            if len(buffered) - checked >= window:
+                                # a block raises mid-stream; shown deltas can't be unshown
+                                await _gr.gate_stream_partial_async(gl, agent, buffered, run_id)
+                                checked = len(buffered)
                 parsed = provider.parse_stream(chunks)
             else:
                 parsed = provider.parse(await create(**kwargs))

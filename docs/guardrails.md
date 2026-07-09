@@ -275,12 +275,53 @@ import { rules, loadPolicy } from '@cendor/guardrails';
 
 <!-- /tabs -->
 
+### Bounded re-ask on an output block
+When an **output**-stage guardrail *blocks* the final answer, you can have the run re-ask the model
+to revise it — up to a cap — instead of raising. Opt in with `Agent(reask_on_output_trip=N)` (default
+`0` = a block raises immediately). Each re-ask is a **full model call** (seconds, and billed), so the
+retry tail is real — but its cost lands in tokenguard/acttrace like any other call, so you can see it.
+It's bounded by both the cap and `max_turns`; if every re-ask still trips, the block raises
+(fail-closed). Non-streaming only.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+<!-- ts-check: skip -->
+
+```python
+agent = Agent(
+    name="writer",
+    guardrails=[rules.json_schema(schema, action="block")],  # e.g. must return valid JSON
+    reask_on_output_trip=2,  # blocked → "revise it" → re-ask, up to twice, then fail-closed
+)
+```
+
+<!-- tab: TypeScript -->
+
+<!-- ts-check: skip -->
+
+```ts
+// Python-first: reask_on_output_trip rides the next @cendor/sdk release. See the parity matrix.
+```
+
+<!-- /tabs -->
+
+### Streaming — incremental output checks
+By default `run.stream` checks output guardrails on the **final** text (a block raises after the
+deltas streamed — already-shown deltas can't be unshown). With `Agent(stream_check_window=N)` the
+output guardrails are *also* evaluated on the buffered text every `N` characters, so a block fires
+**earlier** in the stream. This narrows the exposure window — it doesn't close it (a redact
+mid-stream isn't applied), so treat streaming output as advisory and prefer non-streaming for a hard
+output gate. Single-agent `run.stream` only.
+
 ## Reference
 
 | Name | Signature | What it does |
 |---|---|---|
 | `Agent(guardrails=[…])` | field on `Agent` | the agent's default guardrail list |
 | `Agent(guardrail_mode=…)` | `"blocking"` (default) / `"parallel"` | overlap input-stage checks with the first model call (async) |
+| `Agent(reask_on_output_trip=N)` | int (default 0) | on an output block, re-ask the model up to N times to revise, then fail-closed (non-streaming; cost via tokenguard) |
+| `Agent(stream_check_window=N)` | int chars (default 0) | `run.stream`: also check output on the buffered text every N chars (earlier block; deltas shown can't be unshown) |
 | `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
 | `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes) |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |

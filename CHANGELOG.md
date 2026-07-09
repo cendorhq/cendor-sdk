@@ -10,6 +10,18 @@ Guardrails maturity (plan-guardrails-v02). Additive and backward-compatible. Req
 below — into a single minor with Wave 3; if the waves ship separately, 1.3.0 = Waves 1–2 and
 1.4.0 = Wave 3.)
 
+### Added (Wave 4 — bounded re-ask, streaming checks)
+- **`Agent(reask_on_output_trip=N)`** — when an **output**-stage guardrail *blocks* the final answer,
+  re-ask the model to revise it up to `N` times instead of raising (default `0` = raise immediately).
+  Each re-ask is a full model call — its cost lands in tokenguard/acttrace like any other; bounded by
+  the cap and `max_turns`; if every re-ask still trips, the block raises (fail-closed). Applies to
+  `run` / `run.aio` and per-segment orchestration (non-streaming). The re-asked block is still
+  recorded on the audit chain and `Result.guardrail_decisions`.
+- **`Agent(stream_check_window=N)`** — on `run.stream`, also evaluate the output guardrails on the
+  **buffered** text every `N` characters, so a block fires earlier in the stream (default `0` = final
+  text only). Already-yielded deltas can't be unshown, so this narrows the window, it doesn't close it
+  (redact mid-stream isn't applied) — single-agent `run.stream` only.
+
 ### Added (Wave 3 — hosted rails, config-as-data, grounding)
 - **Hosted rails via `rules`** — `rules.bedrock_guardrail` / `rules.azure_content_safety` /
   `rules.model_armor` re-exported from `cendor-guardrails`, usable in `Agent(guardrails=[…])` at any
