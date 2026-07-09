@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.4.0"
+version = "1.5.0"
 description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
@@ -24,7 +24,7 @@ classifiers = [
 dependencies = [
   "cendor-core>=1.3,<2",         # trace()/current_trace_id() correlation + HF InferenceClient detection
   "cendor-tokenguard>=1.1,<2",   # budget()/track()
-  "cendor-guardrails>=1.2,<2",   # + hosted rails / load_policy / groundedness (1.2); judge/timeout (1.1)
+  "cendor-guardrails>=1.3,<2",   # + spotlight / annotation-parity metadata / task_adherence + Context.instruction (1.3)
   "cendor-acttrace>=1.4,<2",     # guardrail_decision metadata capture — policy_hash provenance (1.4)
   "cendor-contextkit>=1.0,<2",   # assemble-to-budget + provider message adapters
   "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; auto-wires via core's seam)

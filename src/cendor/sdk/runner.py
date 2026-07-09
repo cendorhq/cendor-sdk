@@ -317,8 +317,9 @@ def run_agent_sync(
             parsed = provider.parse(call_with_retry(create, kwargs, retry))
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
+                instruction = _gr.originating_instruction(messages)
                 for tc in parsed.tool_calls:
-                    result = _exec_tool_sync(resolve, tc, gl, agent, run_id)
+                    result = _exec_tool_sync(resolve, tc, gl, agent, run_id, instruction)
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     if tc.name in handoff_targets:
                         switched = handoff_targets[tc.name]
@@ -417,9 +418,10 @@ async def run_agent_async(
                 messages.append(assistant_message(parsed.content, parsed.tool_calls))
                 if parsed.tool_calls:
                     # Execute a turn's tool calls concurrently; append results in request order.
+                    instruction = _gr.originating_instruction(messages)
                     results = await asyncio.gather(
                         *(
-                            _exec_tool_async(resolve, tc, gl, agent, run_id)
+                            _exec_tool_async(resolve, tc, gl, agent, run_id, instruction)
                             for tc in parsed.tool_calls
                         )
                     )
@@ -464,9 +466,10 @@ def _exec_tool_sync(
     guardrails: list | None = None,
     agent: Any = None,
     run_id: str = "",
+    instruction: str = "",
 ) -> str:
     gl = guardrails or []
-    blocked = _gr.gate_tool_call_sync(gl, agent, tc, run_id) if gl else None
+    blocked = _gr.gate_tool_call_sync(gl, agent, tc, run_id, instruction) if gl else None
     if blocked is not None:  # tool_call guardrail blocked — return to the model, don't run the tool
         return blocked
     tool = resolve(tc.name)
@@ -485,9 +488,10 @@ async def _exec_tool_async(
     guardrails: list | None = None,
     agent: Any = None,
     run_id: str = "",
+    instruction: str = "",
 ) -> str:
     gl = guardrails or []
-    blocked = await _gr.gate_tool_call_async(gl, agent, tc, run_id) if gl else None
+    blocked = await _gr.gate_tool_call_async(gl, agent, tc, run_id, instruction) if gl else None
     if blocked is not None:
         return blocked
     tool = resolve(tc.name)
@@ -698,9 +702,10 @@ def stream_agent_sync(
                     yield TextDelta(parsed.content)
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
+                instruction = _gr.originating_instruction(messages)
                 for tc in parsed.tool_calls:
                     yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                    result = _exec_tool_sync(agent.get_tool, tc, gl, agent, run_id)
+                    result = _exec_tool_sync(agent.get_tool, tc, gl, agent, run_id, instruction)
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     yield ToolResultEvent(tc.name, result)
                 continue
@@ -790,9 +795,12 @@ async def stream_agent_async(
                     yield TextDelta(parsed.content)
             messages.append(assistant_message(parsed.content, parsed.tool_calls))
             if parsed.tool_calls:
+                instruction = _gr.originating_instruction(messages)
                 for tc in parsed.tool_calls:
                     yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                    result = await _exec_tool_async(agent.get_tool, tc, gl, agent, run_id)
+                    result = await _exec_tool_async(
+                        agent.get_tool, tc, gl, agent, run_id, instruction
+                    )
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     yield ToolResultEvent(tc.name, result)
                 continue
@@ -886,9 +894,10 @@ def stream_agents_sync(
                         yield TextDelta(parsed.content)
                 messages.append(assistant_message(parsed.content, parsed.tool_calls))
                 if parsed.tool_calls:
+                    instruction = _gr.originating_instruction(messages)
                     for tc in parsed.tool_calls:
                         yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                        result = _exec_tool_sync(tool_map.get, tc, gl, active, child)
+                        result = _exec_tool_sync(tool_map.get, tc, gl, active, child, instruction)
                         messages.append(tool_result_message(tc.id, tc.name, result))
                         yield ToolResultEvent(tc.name, result)
                         if tc.name in transfer_map:
@@ -989,9 +998,12 @@ async def stream_agents_async(
                         yield TextDelta(parsed.content)
                 messages.append(assistant_message(parsed.content, parsed.tool_calls))
                 if parsed.tool_calls:
+                    instruction = _gr.originating_instruction(messages)
                     for tc in parsed.tool_calls:
                         yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                        result = await _exec_tool_async(tool_map.get, tc, gl, active, child)
+                        result = await _exec_tool_async(
+                            tool_map.get, tc, gl, active, child, instruction
+                        )
                         messages.append(tool_result_message(tc.id, tc.name, result))
                         yield ToolResultEvent(tc.name, result)
                         if tc.name in transfer_map:

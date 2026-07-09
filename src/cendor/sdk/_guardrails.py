@@ -221,13 +221,39 @@ def _apply_message_redaction(messages: list[dict], cleaned: Any) -> None:
 # ----------------------------------------------------------------------- tool_call / tool_output
 
 
-def gate_tool_call_sync(guardrails: list, agent: Any, tc: Any, run_id: str) -> str | None:
+def originating_instruction(messages: list[dict]) -> str:
+    """The latest user turn's text in ``messages`` — the run's originating intent. Threaded into the
+    ``tool_call`` gate as :attr:`Context.instruction` so an alignment check (``task_adherence``) can
+    compare a proposed call against what the user asked for. ``""`` when there is no user turn (a
+    check then sees an empty instruction and can fall back or pass)."""
+    for m in reversed(messages):
+        if isinstance(m, dict) and m.get("role") == "user":
+            return _message_text(m)
+    return ""
+
+
+def _message_text(msg: dict) -> str:
+    content = msg.get("content", "")
+    if isinstance(content, list):  # multimodal content blocks → their text parts
+        return "".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
+    return str(content or "")
+
+
+def gate_tool_call_sync(
+    guardrails: list, agent: Any, tc: Any, run_id: str, instruction: str = ""
+) -> str | None:
     """Gate a tool call. Returns a ``"[blocked …]"`` result string to short-circuit the tool, or
-    ``None`` to proceed (after rewriting ``tc.arguments`` for a redact)."""
+    ``None`` to proceed (after rewriting ``tc.arguments`` for a redact). ``instruction`` (the run's
+    originating turn) rides ``Context.instruction`` for an alignment check (A3)."""
     if not _has(guardrails, "tool_call"):
         return None
     ctx = Context(
-        stage="tool_call", agent=agent.name, tool=tc.name, tool_args=tc.arguments, trace_id=run_id
+        stage="tool_call",
+        agent=agent.name,
+        tool=tc.name,
+        tool_args=tc.arguments,
+        instruction=instruction,
+        trace_id=run_id,
     )
     try:
         cleaned, decs = _evaluate(guardrails, "tool_call", tc.arguments, ctx)
@@ -239,11 +265,18 @@ def gate_tool_call_sync(guardrails: list, agent: Any, tc: Any, run_id: str) -> s
     return None
 
 
-async def gate_tool_call_async(guardrails: list, agent: Any, tc: Any, run_id: str) -> str | None:
+async def gate_tool_call_async(
+    guardrails: list, agent: Any, tc: Any, run_id: str, instruction: str = ""
+) -> str | None:
     if not _has(guardrails, "tool_call"):
         return None
     ctx = Context(
-        stage="tool_call", agent=agent.name, tool=tc.name, tool_args=tc.arguments, trace_id=run_id
+        stage="tool_call",
+        agent=agent.name,
+        tool=tc.name,
+        tool_args=tc.arguments,
+        instruction=instruction,
+        trace_id=run_id,
     )
     try:
         cleaned, decs = await _evaluate_async(guardrails, "tool_call", tc.arguments, ctx)

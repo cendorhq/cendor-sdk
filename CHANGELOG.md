@@ -4,6 +4,24 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — Unreleased
+V03 Tier-A wiring (plan-guardrails-v03). Additive and backward-compatible. Requires
+`cendor-guardrails>=1.3`.
+
+### Added
+- **`task_adherence` at the `tool_call` stage (A3)** — the runner now threads the run's originating
+  user turn into `Context.instruction` on the tool-call gate, so a BYO-judge alignment check
+  (`judge.task_adherence(respond)`, reused from `cendor-guardrails`) can compare a proposed tool call
+  against the user's intent. Wire it via `rules.llm_judge(check, stage="tool_call", action="flag")`
+  (advisory + fail-open by default; `action="block"` short-circuits the tool). The judge call rides
+  your instrumented client, so **its own spend is budgeted + audited**. No adherence-rate claim.
+- **`task_adherence` re-exported** at the SDK top level (`from cendor.sdk import task_adherence`,
+  alongside `judge` / `rules`).
+- **A1/A2 ride along** from `cendor-guardrails` 1.3: `rules.spotlight` is re-exported through the SDK
+  `rules` surface, and the reserved annotation-parity metadata keys (`detected` / `filtered` /
+  `redacted` / `severity` / …) now land on the SDK's `guardrail_decision` audit entries with no change
+  to the runner or acttrace.
+
 ## [1.4.0] — Unreleased
 Guardrails maturity (plan-guardrails-v02). Additive and backward-compatible. Requires
 `cendor-guardrails>=1.2` and `cendor-acttrace>=1.4`. (Folds the never-released 1.3.0 — Waves 1 & 2

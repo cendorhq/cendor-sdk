@@ -188,6 +188,47 @@ the anchored patterns miss (noisy — defaults to `flag`). There is **no catch-r
 is exactly acttrace's catalogue, [measured per-category](/docs/benchmarks). Free-text names/addresses
 need the optional `acttrace[ner]` backend.
 
+### Task adherence — is this tool call on-task?
+A tool-call guardrail native to the agent loop: *given the user's instruction and the proposed tool
+call, is the action aligned with intent?* Because the SDK **owns the loop**, it threads the run's
+originating user turn into `Context.instruction`, so `judge.task_adherence(respond)` — a BYO judge
+reusing the [judge helpers](/docs/guardrails#the-llm-judge-helpers) — can compare the proposed call
+against what the user asked for. The judge call rides your `instrument()`-ed client, so **its own
+spend is budgeted by tokenguard and audited by acttrace** — the differentiator no one else has.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+<!-- ts-check: skip -->
+
+```python
+from cendor.sdk import Agent, judge, rules
+
+# respond = your instrumented model call (see the library judge helpers)
+check = judge.task_adherence(respond)
+rail = rules.llm_judge(check, stage="tool_call", action="flag", timeout=8.0, name="task_adherence")
+
+agent = Agent(name="travel", model="gpt-4o", instructions="Book flights only.", guardrails=[rail])
+# a "Book a flight to Paris" turn + a proposed delete_account() call → flagged on the run + chain
+```
+
+<!-- tab: TypeScript -->
+
+<!-- ts-check: skip -->
+
+```ts
+// 🚧 Deferred parity tail: the @cendor/guardrails `judge.taskAdherence` helper is ported, but the
+// @cendor/sdk auto-threading of the user turn into ctx.instruction rides a later release — see the
+// parity matrix. Use the Python SDK for auto-wired task adherence today.
+```
+
+<!-- /tabs -->
+
+Default `action="flag"` (advisory) with `on_error="fail_open"` — misalignment is a softer signal than
+a content block; set `action="block"` to short-circuit the tool instead. It is an extra model call
+(**seconds, billed**) and carries **no adherence-rate claim** — it's a BYO judge, only as good as your
+model + prompt.
+
 ### Parallel mode — overlap a slow check with the model
 By default input-stage guardrails run **before** the first model call (a block is pre-spend, `$0`).
 For a slow tier-3/4 check (an LLM judge, a hosted rail), `guardrail_mode="parallel"` overlaps the
@@ -325,13 +366,14 @@ output gate. Single-agent `run.stream` only.
 | `Agent(reask_on_output_trip=N)` | int (default 0) | on an output block, re-ask the model up to N times to revise, then fail-closed (non-streaming; cost via tokenguard) |
 | `Agent(stream_check_window=N)` | int chars (default 0) | `run.stream`: also check output on the buffered text every N chars (earlier block; deltas shown can't be unshown) |
 | `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
-| `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes) |
+| `rules.*` | `keyword_deny` / `regex_rule` / `spotlight` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes); `spotlight` wraps untrusted content in a trust-lowering delimiter |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
 | `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (`[promptguard]`) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
 | `rules.bedrock_guardrail` / `azure_content_safety` / `model_armor` | hosted rails (BYO cloud client) | AWS ApplyGuardrail / Azure Prompt Shields / Google Model Armor — metered by the vendor; verdict emits a local `guardrail_decision` |
 | `rules.groundedness` / `denied_topics` | similarity checks (BYO `embed`) | RAG-hallucination gate / off-topic gate over cosine similarity — no bundled model |
 | `load_policy` / `LoadedPolicy` | `load_policy("guardrails.yaml") -> list[Guardrail]` | deterministic rules from a versioned file; `policy_hash` / `policy_version` stamped on every decision |
 | `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
+| `judge.task_adherence` / `task_adherence` | `judge.task_adherence(respond)` | BYO-judge **tool_call** alignment check — the runner threads the user turn into `Context.instruction`; wire via `rules.llm_judge(..., stage="tool_call", action="flag")` |
 | `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |
 | `GuardrailTripped` | exception | raised on a fail-closed block; carries `.decisions` |

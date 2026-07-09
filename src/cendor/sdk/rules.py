@@ -40,6 +40,7 @@ from cendor.guardrails.rules import (
     openai_moderation,
     prompt_guard,
     regex_rule,
+    spotlight,
     url_allowlist,
     url_deny,
 )
@@ -48,6 +49,7 @@ __all__ = [
     # deterministic built-ins (re-exported from cendor.guardrails)
     "keyword_deny",
     "regex_rule",
+    "spotlight",
     "url_allowlist",
     "url_deny",
     "length_bounds",

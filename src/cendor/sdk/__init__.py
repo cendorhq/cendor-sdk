@@ -46,6 +46,7 @@ from cendor.guardrails import (
     judge,
     load_policy,
 )
+from cendor.guardrails.judge import task_adherence
 
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
 from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
@@ -166,6 +167,7 @@ __all__ = [
     "guardrail",
     "GuardrailTripped",
     "judge",
+    "task_adherence",
     "load_policy",
     "LoadedPolicy",
     "rules",
