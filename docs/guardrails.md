@@ -245,6 +245,7 @@ for (const d of result.guardrailDecisions) {
 | `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
 | `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes) |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
+| `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (`[promptguard]`) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
 | `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
 | `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |

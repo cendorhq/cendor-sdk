@@ -169,3 +169,12 @@ def test_judge_helper_is_reexported():
     check = judge.judge(lambda s, u: '{"trip": false, "reason": "ok"}', "policy")
     g = rules.llm_judge(check)
     assert g.name == "llm_judge"
+
+
+def test_detection_tier_adapters_reexported():
+    # the SDK rules superset exposes the Wave-2 opt-in adapters (from cendor-guardrails 1.1)
+    for adapter in ("classifier", "prompt_guard", "language", "openai_moderation"):
+        assert hasattr(rules, adapter), adapter
+    # the generic classifier contract works end-to-end via the SDK surface
+    g = rules.classifier(lambda t: 0.9, threshold=0.5, action="flag", stage="input")
+    assert "input" in g.stages

@@ -26,6 +26,13 @@ Guardrails maturity (plan-guardrails-v02). Additive and backward-compatible. Req
   client, so its own spend is budgeted + audited. Per-guardrail `timeout` / `on_error` (from
   `cendor-guardrails` 1.1) flow through `rules.custom` / `rules.llm_judge`.
 
+### Added (Wave 2 — detection-tier adapters via rules)
+- The SDK's `rules` superset now also re-exports the opt-in detection-tier adapters from
+  `cendor-guardrails` 1.1: `rules.classifier` (BYO local model), `rules.prompt_guard` (prompt-injection
+  classifier adapter, `[promptguard]` extra — no jailbreak-detection claim), `rules.language`
+  (language-switch guard), and `rules.openai_moderation` (OpenAI's free moderation endpoint). See the
+  guardrails "Threat model" for what each tier does and doesn't stop.
+
 ## [1.2.0] — 2026-07-09
 
 ### Added

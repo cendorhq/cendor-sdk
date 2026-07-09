@@ -22,13 +22,18 @@ from typing import Any
 
 from cendor.guardrails import STAGES, Context, Guardrail, Verdict, normalize_stages
 
-# Re-export the deterministic built-ins so `from cendor.sdk import rules` is the single surface.
+# Re-export the deterministic built-ins + the opt-in detection-tier adapters so
+# `from cendor.sdk import rules` is the single surface (all from cendor-guardrails 1.1).
 from cendor.guardrails.rules import (
+    classifier,
     custom,
     json_schema,
     keyword_deny,
+    language,
     length_bounds,
     llm_judge,
+    openai_moderation,
+    prompt_guard,
     regex_rule,
     url_allowlist,
     url_deny,
@@ -44,6 +49,11 @@ __all__ = [
     "json_schema",
     "custom",
     "llm_judge",
+    # opt-in detection-tier adapters (re-exported from cendor.guardrails)
+    "classifier",
+    "prompt_guard",
+    "language",
+    "openai_moderation",
     # acttrace-bridged detector guardrails (SDK-only)
     "pii",
     "secrets",
