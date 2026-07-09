@@ -38,7 +38,14 @@ from cendor.core import current_trace_id, trace
 # are distinct, and `evaluate` here is the SDK's eval harness, not guardrails.evaluate.
 # `rules` is the SDK's own superset module (`.rules`): the deterministic cendor.guardrails rules
 # PLUS `pii`/`secrets`/`entropy` bridged from acttrace's catalogue (SDK may import libs).
-from cendor.guardrails import Guardrail, GuardrailTripped, guardrail, judge
+from cendor.guardrails import (
+    Guardrail,
+    GuardrailTripped,
+    LoadedPolicy,
+    guardrail,
+    judge,
+    load_policy,
+)
 
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
 from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
@@ -159,6 +166,8 @@ __all__ = [
     "guardrail",
     "GuardrailTripped",
     "judge",
+    "load_policy",
+    "LoadedPolicy",
     "rules",
     # correlation
     "trace",

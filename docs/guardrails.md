@@ -236,6 +236,45 @@ for (const d of result.guardrailDecisions) {
 
 <!-- /tabs -->
 
+### Hosted rails, config-as-data & grounding
+Everything the [library](/docs/guardrails) added in v02 is usable from the SDK's `rules` — attach it
+to an agent like any other guardrail. The **hosted rails** (`rules.bedrock_guardrail` /
+`azure_content_safety` / `model_armor`) run a *cloud* check on your account, but the verdict still
+lands as a **local** `guardrail_decision` on the run's audit chain — cloud check, local evidence.
+`rules.groundedness` / `rules.denied_topics` gate on a bring-your-own embedding function, and
+**`load_policy`** builds a guardrail list from a versioned JSON/YAML file whose hash + version are
+stamped onto every decision (so the audit chain proves which policy was active).
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+<!-- ts-check: skip -->
+
+```python
+from cendor.sdk import Agent, load_policy, rules
+
+agent = Agent(
+    name="support",
+    guardrails=[
+        rules.bedrock_guardrail(bedrock_client, "gr-abc123"),   # a cloud rail, locally evidenced
+        rules.groundedness(embed, sources=kb_passages, action="flag"),
+        *load_policy("guardrails.yaml"),                         # deterministic rules from a file
+    ],
+)
+```
+
+<!-- tab: TypeScript -->
+
+<!-- ts-check: skip -->
+
+```ts
+// The library rails/config-as-data ship in @cendor/guardrails; the SDK re-export rides the next
+// @cendor/sdk release. Until then, import them from @cendor/guardrails and pass to Agent({ guardrails }).
+import { rules, loadPolicy } from '@cendor/guardrails';
+```
+
+<!-- /tabs -->
+
 ## Reference
 
 | Name | Signature | What it does |
@@ -246,6 +285,9 @@ for (const d of result.guardrailDecisions) {
 | `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes) |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
 | `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (`[promptguard]`) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
+| `rules.bedrock_guardrail` / `azure_content_safety` / `model_armor` | hosted rails (BYO cloud client) | AWS ApplyGuardrail / Azure Prompt Shields / Google Model Armor — metered by the vendor; verdict emits a local `guardrail_decision` |
+| `rules.groundedness` / `denied_topics` | similarity checks (BYO `embed`) | RAG-hallucination gate / off-topic gate over cosine similarity — no bundled model |
+| `load_policy` / `LoadedPolicy` | `load_policy("guardrails.yaml") -> list[Guardrail]` | deterministic rules from a versioned file; `policy_hash` / `policy_version` stamped on every decision |
 | `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
 | `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |

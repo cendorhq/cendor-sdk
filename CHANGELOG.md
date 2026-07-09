@@ -4,9 +4,23 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.0] — Unreleased
+## [1.4.0] — Unreleased
 Guardrails maturity (plan-guardrails-v02). Additive and backward-compatible. Requires
-`cendor-guardrails>=1.1`.
+`cendor-guardrails>=1.2` and `cendor-acttrace>=1.4`. (Folds the never-released 1.3.0 — Waves 1 & 2
+below — into a single minor with Wave 3; if the waves ship separately, 1.3.0 = Waves 1–2 and
+1.4.0 = Wave 3.)
+
+### Added (Wave 3 — hosted rails, config-as-data, grounding)
+- **Hosted rails via `rules`** — `rules.bedrock_guardrail` / `rules.azure_content_safety` /
+  `rules.model_armor` re-exported from `cendor-guardrails`, usable in `Agent(guardrails=[…])` at any
+  of the four stages. The client is bring-your-own (duck-typed, metered by the vendor); every verdict
+  still lands as a local `guardrail_decision` in the run's audit chain ("cloud check, local
+  evidence"). Also re-exported: `rules.groundedness` / `rules.denied_topics` (bring-your-own
+  embedding fn) for RAG-hallucination and off-topic gating.
+- **`load_policy()` / `LoadedPolicy`** re-exported at the SDK top level — declare deterministic
+  guardrails in a versioned JSON/YAML file and pass the result straight to `Agent(guardrails=…)`.
+  The policy's content hash + version are stamped into every decision, so the run's audit chain
+  proves which policy was active.
 
 ### Added (Wave 1 — PII bridge, execution model, decision inspection)
 - **`rules.pii()` / `rules.secrets()` / `rules.entropy()`** — PII/secret guardrails bridged from
