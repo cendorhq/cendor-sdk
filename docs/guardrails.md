@@ -7,9 +7,11 @@ from `cendor.sdk` for one-import convenience. Every decision lands on the same t
 chain the rest of the SDK writes to.
 
 > **Deterministic ≠ adversarial protection.** The built-in rules catch what you configure —
-> keywords, patterns, hosts, sizes, shapes. They do **not** stop a novel jailbreak. Pair them with a
-> bring-your-own model judge (`rules.llm_judge`) for open-ended risk. No jailbreak-detection or
-> PII-catch-rate claims are made here — see [Honest limits](#honest-limits).
+> keywords, patterns, hosts, sizes, shapes. They do **not** stop a novel jailbreak. Layer the higher
+> detection tiers you need — a local classifier, a bring-your-own `rules.llm_judge`, or a hosted rail
+> (`rules.bedrock_guardrail` / `azure_content_safety` / `model_armor`) — for open-ended risk. No
+> jailbreak-detection or PII-catch-rate claims are made without a reproduced, published benchmark —
+> see [Honest limits](#honest-limits) and the library [Threat model](/docs/guardrails#threat-model).
 
 ## Quickstart
 
@@ -337,9 +339,10 @@ output gate. Single-agent `run.stream` only.
 ## Honest limits
 
 - **Deterministic checks don't stop novel adversarial attacks.** The built-ins match exactly what
-  you configure; a jailbreak they were never told about will pass. Add a `rules.llm_judge` (your
-  model call) for open-ended risk — and note it costs real tokens and seconds, where the
-  deterministic rules are microseconds and `$0`.
+  you configure; a jailbreak they were never told about will pass. Layer a higher detection tier for
+  open-ended risk — a local classifier, a `rules.llm_judge` (your model call), or a hosted rail
+  (`rules.bedrock_guardrail` / `azure_content_safety` / `model_armor`) — noting the judge/rail costs
+  real tokens/latency, where the deterministic rules are microseconds and `$0`.
 - **The `output` stage runs after generation.** A blocked output raises *after* the model produced
   it (and was billed). On a streamed run (`run.stream`), the deltas were already yielded and can't be
   unshown — the block still raises before the terminal `RunComplete`, but the text was seen.
