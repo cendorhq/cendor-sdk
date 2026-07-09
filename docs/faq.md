@@ -51,6 +51,16 @@ Almost always one of two things:
 2. **The mode is post-flight** — `on_exceed="raise"` trips *after* the breaching call returns.
    For a hard ceiling use `"block"` ([Governance → budgets](governance.md#budgets)).
 
+## How do I block or redact unsafe input / output?
+
+Attach [`Agent(guardrails=[…])`](guardrails.md): deterministic checks (`keyword_deny`, `regex_rule`,
+`url_allowlist` / `url_deny`, `length_bounds`, `json_schema`, `custom`) at four stages — `input`
+(pre-spend), `tool_call`, `tool_output`, `output`. `block` fails closed (an input block raises before
+the model is called — `$0`), `redact` rewrites the payload, `flag` records; every decision lands on
+the audit chain. Override per run with `run(agent, input, guardrails=[…])`. The checks are
+offline/deterministic, so they don't catch a novel jailbreak — add a `rules.llm_judge` (your model
+call) for open-ended risk, and use [`guard(Policy…)`](governance.md#redaction) for PII/secrets.
+
 ## How do I test an agent without an API key?
 
 Record once, replay forever: wrap the run in

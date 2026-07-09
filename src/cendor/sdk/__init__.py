@@ -32,6 +32,12 @@ from cendor.acttrace import AuditLog, Policy, verify
 # --- correlation (cendor-core) ------------------------------------------------------------------
 from cendor.core import current_trace_id, trace
 
+# --- guardrails gate (cendor-guardrails, re-exported) -------------------------------------------
+# `Guardrail`/`guardrail`/`GuardrailTripped`/`rules` are the one-import convenience for
+# Agent(guardrails=[…]). NOTE: `guard` below stays the acttrace-policy context manager — the two
+# are distinct, and `evaluate` here is the SDK's eval harness, not guardrails.evaluate.
+from cendor.guardrails import Guardrail, GuardrailTripped, guardrail, rules
+
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
 from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
 
@@ -145,6 +151,11 @@ __all__ = [
     "Policy",
     "AuditLog",
     "verify",
+    # guardrails gate (the real cendor-guardrails objects, re-exported)
+    "Guardrail",
+    "guardrail",
+    "GuardrailTripped",
+    "rules",
     # correlation
     "trace",
     "current_trace_id",

@@ -133,13 +133,15 @@ def run_agents(
     session: Any = None,
     checkpoint: Any = None,
     on_step: Any = None,
+    guardrails: list | None = None,
 ) -> Result:
     """Run a handoff/supervised team: ``agents[0]`` is the entry; peers are reached by handoff.
 
     Control transfers when an agent calls a ``transfer_to_<peer>`` tool; the conversation (canonical
     provider-agnostic history) carries across the switch — so handoff works *across providers*.
     ``checkpoint`` (a path or ``Checkpointer``) persists the trajectory after each turn/segment so a
-    crashed multi-agent run resumes without re-doing completed work.
+    crashed multi-agent run resumes without re-doing completed work. ``guardrails`` (if given)
+    overrides every segment's list; otherwise each agent gates with its own ``Agent(guardrails=…)``.
     """
     from .checkpoint import _as_checkpointer
 
@@ -187,6 +189,7 @@ def run_agents(
                 handoff_targets=transfer_map,
                 on_turn=on_turn,
                 on_step=on_step,
+                guardrails=guardrails,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
@@ -217,6 +220,7 @@ async def run_agents_async(
     session: Any = None,
     checkpoint: Any = None,
     on_step: Any = None,
+    guardrails: list | None = None,
 ) -> Result:
     """Async counterpart of :func:`run_agents` (same segment/turn checkpointing)."""
     from .checkpoint import _as_checkpointer
@@ -265,6 +269,7 @@ async def run_agents_async(
                 handoff_targets=transfer_map,
                 on_turn=on_turn,
                 on_step=on_step,
+                guardrails=guardrails,
             )
         steps.extend(seg_steps)
         if switched and switched in registry:

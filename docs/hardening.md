@@ -124,7 +124,9 @@ store.save('user-42', session);          // durable across restarts
 Retries, checkpoints, and stores compose with everything else: a resumed run keeps its
 `trace_id` lineage, retried calls never double-count in [`report()`](governance.md#attribution),
 and the [audit chain](governance.md#audit--redaction) shows what actually executed — including
-the crash-and-resume seam.
+the crash-and-resume seam. To keep a *dangerous* tool call from running at all (rather than
+retrying it), gate it with [`Agent(guardrails=[…])`](guardrails.md) at the `tool_call` stage — a
+block returns to the model instead of executing the side effect.
 
 ## Honest limits
 

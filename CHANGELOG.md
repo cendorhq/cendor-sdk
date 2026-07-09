@@ -4,6 +4,25 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-07-09
+
+### Added
+- **`Agent(guardrails=[…])` — a deterministic gate wired at all four stages of the loop.** Attach
+  `cendor.guardrails` rules (re-exported: `Guardrail`, `guardrail`, `GuardrailTripped`, `rules`) to
+  gate `input` (pre-spend), `tool_call`, `tool_output`, and `output`. A `block` at the input/output
+  stage **raises `GuardrailTripped`** (fail-closed — an input block refuses before the model is ever
+  called, `$0` spent); a `block` at the tool stages returns a `"[blocked by <name>] <reason>"` tool
+  result so the loop continues without the side effect (mirroring `require_approval`'s `"[denied]"`).
+  `redact` rewrites the outgoing messages / tool result / output; `flag` records and proceeds. Every
+  decision emits on the bus, so an attached `AuditLog` chains it as a `guardrail_decision` entry —
+  correlated with the run's decision, no extra wiring. Works on the sync, async, streaming, and
+  multi-agent paths; each agent in a team gates with its own list.
+- **Per-run override — `run(agent, input, guardrails=[…])`** (and `run.aio`) replaces the agent's
+  list for that run; `guardrails=[]` disables gating for the run. For a team, the override applies
+  to every segment. This is per-agent/per-run scoped — unlike the process-global `guard()`, which
+  stays the acttrace-policy context manager (the two are distinct).
+- Depends on `cendor-guardrails>=1.0,<2` (joins the bundled stack).
+
 ## [1.1.1] — 2026-07-08
 
 ### Fixed

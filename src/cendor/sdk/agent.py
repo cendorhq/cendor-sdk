@@ -40,6 +40,13 @@ class Agent:
             When set, context is retrieved for the run's query and injected as a system message
             before the call — "always-on" RAG. (For agentic retrieval, expose it as a tool instead.)
         handoffs: Names of peer agents this agent may transfer to.
+        guardrails: ``cendor.guardrails.Guardrail`` objects gating this agent's four stages
+            (``input`` / ``tool_call`` / ``tool_output`` / ``output``). A ``block`` fails closed
+            (raising ``GuardrailTripped``, or — at ``tool_call`` — returning a ``[blocked …]`` tool
+            result so the loop continues); ``redact`` rewrites the payload; ``flag`` records and
+            continues. Every decision is recorded on the audit chain. Override per run with
+            ``run(agent, input, guardrails=[…])``. Scoped to *this* agent (unlike the process-global
+            ``guard()``).
         api_key / base_url / client: Optional client config, or an explicit instrumented client.
     """
 
@@ -57,6 +64,7 @@ class Agent:
     extra: dict[str, Any] = field(default_factory=dict)
     retriever: Any = None  # Callable[[str], list[str]] — injected as context when set (RAG)
     handoffs: list[Any] = field(default_factory=list)
+    guardrails: list[Any] = field(default_factory=list)  # cendor.guardrails.Guardrail — the gate
     max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator)
     api_key: str | None = field(default=None, repr=False)  # never surface a key in repr()
     base_url: str | None = None

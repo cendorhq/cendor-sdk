@@ -203,5 +203,8 @@ bare instrumented client, and in both languages:
   [parity matrix](/docs/languages) for the language split.
 - **`guard`/interceptors are process-global.** They register on the single in-process event bus,
   not per-call or per-agent, so in a concurrent server they scope around your whole app rather than
-  one request — install policy once at startup, don't toggle it per request.
+  one request — install policy once at startup, don't toggle it per request. For **per-agent,
+  per-run** gating (keyword / regex / URL / length / schema, at four stages) use
+  [`Agent(guardrails=[…])`](guardrails.md) instead — it is scoped to the agent and overridable per
+  run, and records to the same audit chain.
 - **Evidence, not compliance.** The audit chain supports a compliance case; it doesn't make one.

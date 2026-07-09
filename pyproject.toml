@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.1.1"
+version = "1.2.0"
 description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
@@ -24,6 +24,7 @@ classifiers = [
 dependencies = [
   "cendor-core>=1.3,<2",         # trace()/current_trace_id() correlation + HF InferenceClient detection
   "cendor-tokenguard>=1.1,<2",   # budget()/track()
+  "cendor-guardrails>=1.0,<2",   # Agent(guardrails=[...]) — the deterministic gate (needs core>=1.1)
   "cendor-acttrace>=1.2,<2",     # AuditLog/guard/Policy (guard redact-before-send needs core>=1.1)
   "cendor-contextkit>=1.0,<2",   # assemble-to-budget + provider message adapters
   "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; auto-wires via core's seam)
@@ -73,6 +74,7 @@ packages = ["src/cendor"]     # contributes cendor/sdk ONLY — NEVER add src/ce
 [tool.uv.sources]
 cendor-core = { path = "../cendor-libs/packages/cendor-core", editable = true }
 cendor-tokenguard = { path = "../cendor-libs/packages/cendor-tokenguard", editable = true }
+cendor-guardrails = { path = "../cendor-libs/packages/cendor-guardrails", editable = true }
 cendor-acttrace = { path = "../cendor-libs/packages/cendor-acttrace", editable = true }
 cendor-contextkit = { path = "../cendor-libs/packages/cendor-contextkit", editable = true }
 cendor-squeeze = { path = "../cendor-libs/packages/cendor-squeeze", editable = true }

@@ -82,6 +82,7 @@ graph TD
 | [Getting started](getting-started.md) | Install, a first governed agent, and where each concept lives. |
 | [Agents & the loop](agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal. |
 | [Governance](governance.md) | Budgets, spend attribution, audit + redaction, record/replay testing. |
+| [Guardrails](guardrails.md) | `Agent(guardrails=[…])` — a deterministic gate at four stages (input / tool call / tool output / output). |
 | [Memory & sessions](memory.md) | `Session`, durable stores, summarization, fitting memory to the window. |
 | [Retrieval (RAG)](rag.md) | Governed embeddings, `VectorIndex`, always-on and agentic retrieval. |
 | [Multi-agent](multi-agent.md) | Handoff, supervisor, pipelines — one correlated, governed tree. |
@@ -93,11 +94,13 @@ graph TD
 
 ## What "governed" means here
 
-Four production concerns ride every run without per-call wiring, because the SDK executes each
+Five production concerns ride every run without per-call wiring, because the SDK executes each
 model and tool call through [`cendor-core`](/docs/core)'s event bus:
 
 - **Cost** — [`budget(...)`](governance.md#budgets) caps a run *before* an over-budget call executes;
   [`track(...)`](governance.md#attribution) attributes spend per feature/user for free.
+- **Safety** — [`Agent(guardrails=[…])`](guardrails.md) gates input / tool calls / tool output /
+  output with deterministic checks: block (fail-closed, pre-spend at input), redact, or flag.
 - **Evidence** — an [`AuditLog`](governance.md#audit--redaction) records every step in a
   tamper-evident hash chain you can `verify()` offline.
 - **Privacy** — [`guard(Policy...)`](governance.md#audit--redaction) redacts PII before the
