@@ -4,7 +4,7 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] — Unreleased
+## [1.5.0] — 2026-07-09
 V03 Tier-A wiring (plan-guardrails-v03). Additive and backward-compatible. Requires
 `cendor-guardrails>=1.3`.
 
