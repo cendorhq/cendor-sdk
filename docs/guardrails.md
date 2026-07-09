@@ -217,9 +217,15 @@ agent = Agent(name="travel", model="gpt-4o", instructions="Book flights only.", 
 <!-- ts-check: skip -->
 
 ```ts
-// 🚧 Deferred parity tail: the @cendor/guardrails `judge.taskAdherence` helper is ported, but the
-// @cendor/sdk auto-threading of the user turn into ctx.instruction rides a later release — see the
-// parity matrix. Use the Python SDK for auto-wired task adherence today.
+import { Agent, judge, rules } from '@cendor/sdk';
+
+// respond = your instrumented model call (see the library judge helpers)
+const check = judge.taskAdherence(respond);
+const rail = rules.llmJudge(check, { stage: 'tool_call', action: 'flag', timeout: 8 });
+
+const agent = new Agent({ name: 'travel', model: 'gpt-4o', instructions: 'Book flights only.', guardrails: [rail] });
+// @cendor/sdk >= 0.7.0 auto-threads the user's turn into ctx.instruction — no manual wiring.
+// a "Book a flight to Paris" turn + a proposed deleteAccount() call → flagged on the run + chain
 ```
 
 <!-- /tabs -->
