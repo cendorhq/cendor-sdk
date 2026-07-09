@@ -44,9 +44,13 @@ class Agent:
             (``input`` / ``tool_call`` / ``tool_output`` / ``output``). A ``block`` fails closed
             (raising ``GuardrailTripped``, or — at ``tool_call`` — returning a ``[blocked …]`` tool
             result so the loop continues); ``redact`` rewrites the payload; ``flag`` records and
-            continues. Every decision is recorded on the audit chain. Override per run with
-            ``run(agent, input, guardrails=[…])``. Scoped to *this* agent (unlike the process-global
-            ``guard()``).
+            continues. Every decision is recorded on the audit chain (and on
+            ``Result.guardrail_decisions``). Override per run with ``run(agent, input,
+            guardrails=[…])``. Scoped to *this* agent (unlike the process-global ``guard()``).
+        guardrail_mode: ``"blocking"`` (default) runs input-stage guardrails before the first model
+            call (a block is pre-spend, ``$0``); ``"parallel"`` overlaps them with the first call
+            for lower latency on the pass path — worthwhile only for slow tier-3/4 checks (an LLM
+            judge, a hosted rail), and async-only. See ``run.aio`` and docs/guardrails.md.
         api_key / base_url / client: Optional client config, or an explicit instrumented client.
     """
 
@@ -65,6 +69,7 @@ class Agent:
     retriever: Any = None  # Callable[[str], list[str]] — injected as context when set (RAG)
     handoffs: list[Any] = field(default_factory=list)
     guardrails: list[Any] = field(default_factory=list)  # cendor.guardrails.Guardrail — the gate
+    guardrail_mode: str = "blocking"  # "blocking" | "parallel" (input-stage overlap; async-only)
     max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator)
     api_key: str | None = field(default=None, repr=False)  # never surface a key in repr()
     base_url: str | None = None

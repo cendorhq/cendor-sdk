@@ -33,14 +33,17 @@ from cendor.acttrace import AuditLog, Policy, verify
 from cendor.core import current_trace_id, trace
 
 # --- guardrails gate (cendor-guardrails, re-exported) -------------------------------------------
-# `Guardrail`/`guardrail`/`GuardrailTripped`/`rules` are the one-import convenience for
+# `Guardrail`/`guardrail`/`GuardrailTripped`/`judge`/`rules` are the one-import convenience for
 # Agent(guardrails=[…]). NOTE: `guard` below stays the acttrace-policy context manager — the two
 # are distinct, and `evaluate` here is the SDK's eval harness, not guardrails.evaluate.
-from cendor.guardrails import Guardrail, GuardrailTripped, guardrail, rules
+# `rules` is the SDK's own superset module (`.rules`): the deterministic cendor.guardrails rules
+# PLUS `pii`/`secrets`/`entropy` bridged from acttrace's catalogue (SDK may import libs).
+from cendor.guardrails import Guardrail, GuardrailTripped, guardrail, judge
 
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
 from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
 
+from . import rules
 from ._governance import guard
 
 # --- the SDK -----------------------------------------------------------------------------------
@@ -155,6 +158,7 @@ __all__ = [
     "Guardrail",
     "guardrail",
     "GuardrailTripped",
+    "judge",
     "rules",
     # correlation
     "trace",

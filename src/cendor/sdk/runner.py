@@ -348,8 +348,16 @@ async def run_agent_async(
     on_turn: Any = None,
     on_step: Any = None,
     guardrails: list | None = None,
+    guardrail_mode: str | None = None,
 ) -> tuple[Any, list[Step], str | None]:
-    """Async counterpart of :func:`run_agent_sync`."""
+    """Async counterpart of :func:`run_agent_sync`.
+
+    With ``guardrail_mode="parallel"`` the input-stage guardrails run **concurrently with the first
+    model call** instead of before it (OpenAI-parity): their latency hides behind the call on the
+    pass path. A block still surfaces as ``GuardrailTripped``, but the in-flight call may already
+    have completed (and been billed) — the default ``"blocking"`` mode guarantees ``$0`` on a block
+    and is the only mode that applies input *redaction* before the call.
+    """
     provider = agent.provider_impl
     create = provider.create_method(_client_for(agent, async_=True))
     tools = agent.toolset if tools is None else tools
@@ -358,6 +366,7 @@ async def run_agent_async(
     json_mode = agent.output_type is not None
     turns = max_turns or agent.max_turns
     gl = _gr.effective(agent, guardrails)
+    mode = _gr.effective_mode(agent, guardrail_mode)
     output: Any = None
     switched: str | None = None
 
@@ -366,43 +375,65 @@ async def run_agent_async(
         trace(run_id),
         _decision(audit, agent, messages, run_id),
     ):
-        await _gr.gate_input_async(gl, agent, messages, run_id)  # pre-spend: block raises / redact
-        for _turn in range(turns):
-            wire = _assemble(agent, messages)
-            kwargs = provider.build_kwargs(
-                agent.model,
-                wire,
-                tools,
-                agent.instructions,
-                json_mode=json_mode,
-                temperature=agent.temperature,
-                max_tokens=agent.max_tokens,
-                output_schema=_schema_from_output_type(agent.output_type),
-            )
-            if agent.extra:
-                kwargs.update(agent.extra)  # provider-param passthrough (tool_choice, reasoning, …)
-            if agent.cache:
-                kwargs = provider.apply_cache(kwargs)
-            parsed = provider.parse(await acall_with_retry(create, kwargs, retry))
-            messages.append(assistant_message(parsed.content, parsed.tool_calls))
-            if parsed.tool_calls:
-                # Execute a turn's tool calls concurrently; append results in request order.
-                results = await asyncio.gather(
-                    *(_exec_tool_async(resolve, tc, gl, agent, run_id) for tc in parsed.tool_calls)
+        gate_task = None
+        if mode == "parallel":  # overlap the input gate with the first model call
+            gate_task = _gr.start_input_gate_async(gl, agent, messages, run_id)
+        else:
+            await _gr.gate_input_async(gl, agent, messages, run_id)  # pre-spend: block / redact
+        try:
+            for _turn in range(turns):
+                wire = _assemble(agent, messages)
+                kwargs = provider.build_kwargs(
+                    agent.model,
+                    wire,
+                    tools,
+                    agent.instructions,
+                    json_mode=json_mode,
+                    temperature=agent.temperature,
+                    max_tokens=agent.max_tokens,
+                    output_schema=_schema_from_output_type(agent.output_type),
                 )
-                for tc, result in zip(parsed.tool_calls, results, strict=True):
-                    messages.append(tool_result_message(tc.id, tc.name, result))
-                    if tc.name in handoff_targets:
-                        switched = handoff_targets[tc.name]
+                if agent.extra:
+                    kwargs.update(
+                        agent.extra
+                    )  # provider-param passthrough (tool_choice, reasoning)
+                if agent.cache:
+                    kwargs = provider.apply_cache(kwargs)
+                parsed = provider.parse(await acall_with_retry(create, kwargs, retry))
+                if gate_task is not None:  # parallel mode: join the input gate (block raises here)
+                    await gate_task
+                    gate_task = None
+                messages.append(assistant_message(parsed.content, parsed.tool_calls))
+                if parsed.tool_calls:
+                    # Execute a turn's tool calls concurrently; append results in request order.
+                    results = await asyncio.gather(
+                        *(
+                            _exec_tool_async(resolve, tc, gl, agent, run_id)
+                            for tc in parsed.tool_calls
+                        )
+                    )
+                    for tc, result in zip(parsed.tool_calls, results, strict=True):
+                        messages.append(tool_result_message(tc.id, tc.name, result))
+                        if tc.name in handoff_targets:
+                            switched = handoff_targets[tc.name]
+                    if on_turn is not None:
+                        on_turn(messages)
+                    if switched:
+                        break
+                    continue
+                output = await _gr.gate_output_async(gl, agent, parsed.content, run_id)  # block
                 if on_turn is not None:
                     on_turn(messages)
-                if switched:
-                    break
-                continue
-            output = await _gr.gate_output_async(gl, agent, parsed.content, run_id)  # block raises
-            if on_turn is not None:
-                on_turn(messages)
-            break
+                break
+        finally:
+            # Parallel mode: if the loop exited before joining the input gate (e.g. the first model
+            # call raised), don't leak a pending task — cancel and drain its result/exception.
+            if gate_task is not None:
+                gate_task.cancel()
+                try:
+                    await gate_task
+                except BaseException:  # noqa: BLE001 - the primary error already propagates
+                    pass
 
     return output, [_step(agent.name, e) for e in events], switched
 
@@ -470,6 +501,7 @@ class Runner:
         checkpoint: Any = None,
         on_step: Any = None,
         guardrails: list | None = None,
+        guardrail_mode: str | None = None,
     ) -> None:
         from .checkpoint import _as_checkpointer
 
@@ -481,6 +513,7 @@ class Runner:
         self.checkpoint = _as_checkpointer(checkpoint)
         self.on_step = on_step
         self.guardrails = guardrails  # per-run override; None ⇒ use the agent's own list
+        self.guardrail_mode = guardrail_mode  # per-run override; None ⇒ use the agent's own mode
 
     def _start(self, input: Any) -> tuple[list[dict], str, Any]:
         """Resolve starting messages (resuming from a checkpoint if one is unfinished)."""
@@ -512,6 +545,7 @@ class Runner:
             agents=[self.agent.name],
             messages=list(state.get("messages") or []),
             incomplete=output is None,
+            guardrail_decisions=_gr.snapshot(),  # empty on a resume (the loop never ran)
         )
 
     def _finish(self, run_id: str, output: Any, steps: list, messages: list[dict]) -> Result:
@@ -528,6 +562,7 @@ class Runner:
             agents=[self.agent.name],
             messages=messages,
             incomplete=output is None,  # no final answer (e.g. max_turns hit mid tool loop)
+            guardrail_decisions=_gr.snapshot(),
         )
 
     def run(self, input: Any) -> Result:
@@ -535,38 +570,41 @@ class Runner:
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
             return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
-        with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
-            output, steps, _ = run_agent_sync(
-                self.agent,
-                messages,
-                run_id,
-                audit=self.audit,
-                max_turns=self.max_turns,
-                retry=self.retry,
-                on_turn=on_turn,
-                on_step=self.on_step,
-                guardrails=self.guardrails,
-            )
-        return self._finish(run_id, output, steps, messages)
+        with _gr.collecting():  # collect decisions for Result.guardrail_decisions
+            with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
+                output, steps, _ = run_agent_sync(
+                    self.agent,
+                    messages,
+                    run_id,
+                    audit=self.audit,
+                    max_turns=self.max_turns,
+                    retry=self.retry,
+                    on_turn=on_turn,
+                    on_step=self.on_step,
+                    guardrails=self.guardrails,
+                )
+            return self._finish(run_id, output, steps, messages)
 
     async def run_async(self, input: Any) -> Result:
         done = self.checkpoint.finished() if self.checkpoint else None
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
             return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
-        with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
-            output, steps, _ = await run_agent_async(
-                self.agent,
-                messages,
-                run_id,
-                audit=self.audit,
-                max_turns=self.max_turns,
-                retry=self.retry,
-                on_turn=on_turn,
-                on_step=self.on_step,
-                guardrails=self.guardrails,
-            )
-        return self._finish(run_id, output, steps, messages)
+        with _gr.collecting():  # collect decisions for Result.guardrail_decisions
+            with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
+                output, steps, _ = await run_agent_async(
+                    self.agent,
+                    messages,
+                    run_id,
+                    audit=self.audit,
+                    max_turns=self.max_turns,
+                    retry=self.retry,
+                    on_turn=on_turn,
+                    on_step=self.on_step,
+                    guardrails=self.guardrails,
+                    guardrail_mode=self.guardrail_mode,
+                )
+            return self._finish(run_id, output, steps, messages)
 
 
 # --------------------------------------------------------------------------- streaming
@@ -599,6 +637,7 @@ def stream_agent_sync(
         _collector(run_id) as events,
         trace(run_id),
         _decision(audit, agent, messages, run_id),
+        _gr.collecting() as run_decisions,  # for Result.guardrail_decisions
     ):
         _gr.gate_input_sync(gl, agent, messages, run_id)  # pre-spend: block raises, redact rewrites
         for _turn in range(turns):
@@ -652,6 +691,7 @@ def stream_agent_sync(
             agents=[agent.name],
             messages=messages,
             incomplete=output is None,
+            guardrail_decisions=list(run_decisions),
         )
     )
 
@@ -680,6 +720,7 @@ async def stream_agent_async(
         _collector(run_id) as events,
         trace(run_id),
         _decision(audit, agent, messages, run_id),
+        _gr.collecting() as run_decisions,  # for Result.guardrail_decisions
     ):
         await _gr.gate_input_async(gl, agent, messages, run_id)  # pre-spend: block raises / redact
         for _turn in range(turns):
@@ -734,6 +775,7 @@ async def stream_agent_async(
             agents=[agent.name],
             messages=messages,
             incomplete=output is None,
+            guardrail_decisions=list(run_decisions),
         )
     )
 
@@ -758,6 +800,7 @@ def stream_agents_sync(
     seen: list[str] = []
     steps: list = []
     output: Any = None
+    run_decisions: list = []  # accumulated across segments for Result.guardrail_decisions
     for seg in range(2 * len(registry) + 2):
         if active.name not in seen:
             seen.append(active.name)
@@ -774,6 +817,7 @@ def stream_agents_sync(
             _collector(child, agent_name=active.name) as events,
             trace(child),
             _decision(audit, active, messages, child),
+            _gr.collecting() as seg_decisions,  # per-segment; accumulated below
         ):
             _gr.gate_input_sync(gl, active, messages, child)  # pre-spend per segment
             for _turn in range(turns):
@@ -819,6 +863,7 @@ def stream_agents_sync(
                 output = _gr.gate_output_sync(gl, active, parsed.content, child)
                 break
         steps.extend(_step(active.name, e) for e in events)
+        run_decisions.extend(seg_decisions)
         if switched and switched in registry:
             active = registry[switched]
             continue
@@ -834,6 +879,7 @@ def stream_agents_sync(
             agents=seen,
             messages=messages,
             incomplete=output is None,
+            guardrail_decisions=list(run_decisions),
         )
     )
 
@@ -856,6 +902,7 @@ async def stream_agents_async(
     seen: list[str] = []
     steps: list = []
     output: Any = None
+    run_decisions: list = []  # accumulated across segments for Result.guardrail_decisions
     for seg in range(2 * len(registry) + 2):
         if active.name not in seen:
             seen.append(active.name)
@@ -872,6 +919,7 @@ async def stream_agents_async(
             _collector(child, agent_name=active.name) as events,
             trace(child),
             _decision(audit, active, messages, child),
+            _gr.collecting() as seg_decisions,  # per-segment; accumulated below
         ):
             await _gr.gate_input_async(gl, active, messages, child)  # pre-spend per segment
             for _turn in range(turns):
@@ -918,6 +966,7 @@ async def stream_agents_async(
                 output = await _gr.gate_output_async(gl, active, parsed.content, child)
                 break
         steps.extend(_step(active.name, e) for e in events)
+        run_decisions.extend(seg_decisions)
         if switched and switched in registry:
             active = registry[switched]
             continue
@@ -933,6 +982,7 @@ async def stream_agents_async(
             agents=seen,
             messages=messages,
             incomplete=output is None,
+            guardrail_decisions=list(run_decisions),
         )
     )
 
@@ -960,24 +1010,28 @@ class _Run:
         checkpoint: Any = None,
         on_step: Any = None,
         guardrails: list | None = None,
+        guardrail_mode: str | None = None,
     ) -> Result:
         """``on_step`` (if set) is called with each :class:`~cendor.sdk.result.Step` live as the
         run progresses — a public progress hook, complementing the post-hoc ``Result.steps``.
         ``guardrails`` overrides the agent's own list for this run (for a team, it replaces every
-        segment's list); omit it to use each agent's ``Agent(guardrails=[…])``."""
+        segment's list); omit it to use each agent's ``Agent(guardrails=[…])``. ``guardrail_mode``
+        (``"blocking"`` / ``"parallel"``) is honoured on the async path (``run.aio``); a sync run
+        always blocks."""
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents
 
-            return run_agents(
-                list(agent),
-                input,
-                audit=audit,
-                max_turns=max_turns,
-                session=session,
-                checkpoint=checkpoint,
-                on_step=on_step,
-                guardrails=guardrails,
-            )
+            with _gr.collecting():  # run_agents builds its Result inside this scope
+                return run_agents(
+                    list(agent),
+                    input,
+                    audit=audit,
+                    max_turns=max_turns,
+                    session=session,
+                    checkpoint=checkpoint,
+                    on_step=on_step,
+                    guardrails=guardrails,
+                )
         return Runner(
             agent,
             session=session,
@@ -987,6 +1041,7 @@ class _Run:
             checkpoint=checkpoint,
             on_step=on_step,
             guardrails=guardrails,
+            guardrail_mode=guardrail_mode,
         ).run(input)
 
     async def aio(
@@ -1001,22 +1056,25 @@ class _Run:
         checkpoint: Any = None,
         on_step: Any = None,
         guardrails: list | None = None,
+        guardrail_mode: str | None = None,
     ) -> Result:
         """Async counterpart of :meth:`__call__`; ``on_step`` fires per :class:`Step` live.
-        ``guardrails`` overrides the agent's own list for this run."""
+        ``guardrails`` overrides the agent's own list for this run; ``guardrail_mode``
+        (``"blocking"`` / ``"parallel"``) overrides the agent's mode (single-agent runs)."""
         if isinstance(agent, (list, tuple)):
             from .orchestration import run_agents_async
 
-            return await run_agents_async(
-                list(agent),
-                input,
-                audit=audit,
-                max_turns=max_turns,
-                session=session,
-                checkpoint=checkpoint,
-                on_step=on_step,
-                guardrails=guardrails,
-            )
+            with _gr.collecting():  # run_agents_async builds its Result inside this scope
+                return await run_agents_async(
+                    list(agent),
+                    input,
+                    audit=audit,
+                    max_turns=max_turns,
+                    session=session,
+                    checkpoint=checkpoint,
+                    on_step=on_step,
+                    guardrails=guardrails,
+                )
         return await Runner(
             agent,
             session=session,
@@ -1026,6 +1084,7 @@ class _Run:
             checkpoint=checkpoint,
             on_step=on_step,
             guardrails=guardrails,
+            guardrail_mode=guardrail_mode,
         ).run_async(input)
 
     def stream(

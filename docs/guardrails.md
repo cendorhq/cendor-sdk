@@ -141,13 +141,112 @@ context manager — **process-global** PII/secret detection (validator-gated det
 interceptor seam. Use `guard()` for PII/secrets (one detection engine), guardrails for keyword /
 regex / URL / length / schema gating with per-agent scope. Both record to the same audit chain.
 
+### PII & secrets — bridged from acttrace
+`cendor-guardrails` ships **no** PII detector — detection is `acttrace`'s catalogue. The SDK imports
+every library, so it composes them: `rules.pii()` / `rules.secrets()` / `rules.entropy()` are
+guardrails whose check calls `acttrace.scan`/`redact`. They gate **all four stages by default** —
+including `tool_output`, which the process-global `guard()` interceptor never sees (it only gates
+LLM/tool *inputs*). One detection engine, wired to the agent loop.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, Policy, rules
+
+agent = Agent(
+    name="support", model="gpt-4o", instructions="Help.",
+    guardrails=[
+        rules.pii(action="redact"),                       # scrub PII/secrets on every stage
+        rules.secrets(action="block", stage="tool_output"),  # a tool must never surface a key
+    ],
+)
+# rules.pii(Policy.gdpr(), action="block")   # widen the net with a Policy preset
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, rules } from '@cendor/sdk';
+
+const agent = new Agent({
+  name: 'support', model: 'gpt-4o', instructions: 'Help.',
+  guardrails: [
+    rules.pii(undefined, { action: 'redact' }), // scrub PII/secrets on every stage
+    rules.secrets({ action: 'block', stage: 'tool_output' }), // a tool must never surface a key
+  ],
+});
+```
+
+<!-- /tabs -->
+
+`rules.pii(policy=Policy.default())` is governed by the policy (secrets + emails by default; pass a
+preset for more); `secrets()` scopes to keys/tokens; `entropy()` catches opaque high-entropy secrets
+the anchored patterns miss (noisy — defaults to `flag`). There is **no catch-rate claim**: coverage
+is exactly acttrace's catalogue, [measured per-category](/docs/benchmarks). Free-text names/addresses
+need the optional `acttrace[ner]` backend.
+
+### Parallel mode — overlap a slow check with the model
+By default input-stage guardrails run **before** the first model call (a block is pre-spend, `$0`).
+For a slow tier-3/4 check (an LLM judge, a hosted rail), `guardrail_mode="parallel"` overlaps the
+input gate with the first model call so its latency hides behind the call on the pass path (async
+only). Honest trade-off: on a block the model call may already have completed (and been billed) —
+blocking mode is the only mode that guarantees `$0` on a block and applies input *redaction* before
+the call.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+result = await run.aio(agent, "…", guardrail_mode="parallel")   # or Agent(guardrail_mode="parallel")
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { run } from '@cendor/sdk';
+
+const result = await run(agent, '…', { guardrailMode: 'parallel' });
+```
+
+<!-- /tabs -->
+
+### Inspecting decisions — `Result.guardrail_decisions`
+Every trip/flag on a completed run is on the result, for post-hoc inspection without re-reading the
+audit file. (A fail-closed **block** raises `GuardrailTripped` instead of returning a `Result` — read
+that exception's `.decisions`.)
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+result = run(agent, "email alice@example.com the report")
+for d in result.guardrail_decisions:
+    print(d.stage, d.action, d.guardrail, d.reason)   # e.g. input redact pii "pii: email"
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+const result = await run(agent, 'email alice@example.com the report');
+for (const d of result.guardrailDecisions) {
+  console.log(d.stage, d.action, d.guardrail, d.reason);
+}
+```
+
+<!-- /tabs -->
+
 ## Reference
 
 | Name | Signature | What it does |
 |---|---|---|
 | `Agent(guardrails=[…])` | field on `Agent` | the agent's default guardrail list |
-| `run(agent, input, guardrails=…)` | `run` / `run.aio` kwarg | per-run override (`[]` disables) |
-| `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` | the built-in rule factories — see the [library reference](/docs/guardrails#functions--classes) |
+| `Agent(guardrail_mode=…)` | `"blocking"` (default) / `"parallel"` | overlap input-stage checks with the first model call (async) |
+| `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
+| `rules.*` | `keyword_deny` / `regex_rule` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes) |
+| `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
+| `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
+| `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |
 | `GuardrailTripped` | exception | raised on a fail-closed block; carries `.decisions` |
 
@@ -160,5 +259,10 @@ regex / URL / length / schema gating with per-agent scope. Both record to the sa
 - **The `output` stage runs after generation.** A blocked output raises *after* the model produced
   it (and was billed). On a streamed run (`run.stream`), the deltas were already yielded and can't be
   unshown — the block still raises before the terminal `RunComplete`, but the text was seen.
-- **PII/secret detection is `guard()`'s job, not a built-in here** — one detection engine, kept in
-  `acttrace`.
+- **PII/secret detection is bridged from `acttrace`, not a second engine.** `rules.pii()` /
+  `secrets()` / `entropy()` call acttrace's catalogue — coverage is exactly that catalogue (no
+  catch-rate claim; free-text names/addresses need `acttrace[ner]`). `guard(Policy…)` remains the
+  process-global option; the guardrails are per-agent and reach `tool_output`.
+- **Parallel mode can still bill a blocked call.** `guardrail_mode="parallel"` overlaps the input
+  check with the first model call, so on a trip the call may already have completed. Use the default
+  blocking mode when you need the `$0`-on-block guarantee or input redaction before the call.

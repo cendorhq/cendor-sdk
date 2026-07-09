@@ -59,7 +59,9 @@ Attach [`Agent(guardrails=[…])`](guardrails.md): deterministic checks (`keywor
 the model is called — `$0`), `redact` rewrites the payload, `flag` records; every decision lands on
 the audit chain. Override per run with `run(agent, input, guardrails=[…])`. The checks are
 offline/deterministic, so they don't catch a novel jailbreak — add a `rules.llm_judge` (your model
-call) for open-ended risk, and use [`guard(Policy…)`](governance.md#redaction) for PII/secrets.
+call) for open-ended risk. For PII/secrets, `rules.pii()` / `rules.secrets()` / `rules.entropy()`
+bridge `acttrace`'s detector catalogue as guardrails at all four stages (including `tool_output`);
+`guard(Policy…)` remains the process-global option.
 
 ## How do I test an agent without an API key?
 

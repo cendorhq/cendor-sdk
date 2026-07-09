@@ -4,6 +4,28 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — Unreleased
+Guardrails maturity (plan-guardrails-v02). Additive and backward-compatible. Requires
+`cendor-guardrails>=1.1`.
+
+### Added (Wave 1 — PII bridge, execution model, decision inspection)
+- **`rules.pii()` / `rules.secrets()` / `rules.entropy()`** — PII/secret guardrails bridged from
+  `acttrace`'s detector catalogue (the SDK may import libraries; the tool→tool ban only constrains
+  the libraries). They gate **all four stages by default — including `tool_output`**, which the
+  process-global `guard()` never sees. `rules` is now the SDK's own superset module (the
+  deterministic `cendor.guardrails` rules re-exported + the three bridged ones). No catch-rate claim
+  — coverage is exactly acttrace's catalogue.
+- **`Agent(guardrail_mode=…)`** + per-run `run(agent, input, guardrail_mode="parallel")` — overlap
+  input-stage guardrails with the first model call (OpenAI-parity, async only) for lower latency on
+  the pass path; default `"blocking"` stays pre-spend. Honest limit: parallel mode can bill a call a
+  later trip blocks, and does not apply input redaction before the call.
+- **`Result.guardrail_decisions`** — every trip/flag recorded during a run, for post-hoc inspection
+  without re-reading the audit file (populated for `run` / `run.aio` / `run.stream` / teams).
+- **`judge` re-exported** from `cendor.sdk` — the `cendor.guardrails.judge` helpers (verdict prompt +
+  strict-JSON parsing) for building `rules.llm_judge` checks; the judge call rides an instrumented
+  client, so its own spend is budgeted + audited. Per-guardrail `timeout` / `on_error` (from
+  `cendor-guardrails` 1.1) flow through `rules.custom` / `rules.llm_judge`.
+
 ## [1.2.0] — 2026-07-09
 
 ### Added

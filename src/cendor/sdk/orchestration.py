@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from . import _guardrails as _gr
 from ._governance import _scope
 from .agent import Agent
 from .result import Result
@@ -208,6 +209,7 @@ def run_agents(
         agents=seen,
         messages=messages,
         incomplete=output is None,
+        guardrail_decisions=_gr.snapshot(),
     )
 
 
@@ -288,6 +290,7 @@ async def run_agents_async(
         agents=seen,
         messages=messages,
         incomplete=output is None,
+        guardrail_decisions=_gr.snapshot(),
     )
 
 

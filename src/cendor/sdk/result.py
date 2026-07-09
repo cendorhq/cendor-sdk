@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from cendor.core.types import LLMCall, Money, ToolCall, Usage
+from cendor.guardrails import GuardrailDecision
 
 
 @dataclass
@@ -66,6 +67,13 @@ class Result:
     incomplete: bool = False
     """True if the run ended without a final answer — e.g. ``max_turns`` was hit with tool calls
     still pending. A finished, answered run is ``False``."""
+
+    guardrail_decisions: list[GuardrailDecision] = field(default_factory=list)
+    """Every guardrail trip/flag recorded during the run (redact/flag on the four stages, and any
+    ``tool_call``/``tool_output`` block that returned a ``"[blocked …]"`` result to the model), in
+    order — for post-hoc inspection without re-reading the audit file. A run that ended in a
+    fail-closed ``block`` raised ``GuardrailTripped`` instead of returning a ``Result``; read that
+    exception's ``.decisions`` for the blocking decision."""
 
     # --- convenience views ---------------------------------------------------------------------
 
