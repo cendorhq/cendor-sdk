@@ -1,0 +1,259 @@
+"""``doctor`` — validate the wiring so it doesn't break at runtime. Static checks only; NEVER mutates.
+
+Exits non-zero on hard problems (CI-usable), zero when only warnings remain. Python is checked with
+the installed environment (importlib.metadata) when available — accurate — and falls back to the
+declared pins under ``uvx`` isolation. The npm ecosystem gets a "run @cendor/init doctor" pointer.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from . import versions as version_snapshot
+from .detect import (
+    PYPI_PKG_FOR_PROVIDER,
+    SDK_EXTRA_FOR_PROVIDER,
+    Detected,
+    detect_project,
+    provider_installed,
+    providers_used_in_source,
+)
+from .scan import rel, walk_source
+from .semver import clean_version, compare_versions, range_blocks_latest
+
+PY_EXTS = (".py",)
+NODE_EXTS = (".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs")
+
+_MONEY_CONTEXT = re.compile(r"(cost|price|prices|money|usd|\.estimate\s*\(|Money|Decimal)")
+_INSTRUMENT_RE = re.compile(r"\binstrument\s*\(")
+_USES_CENDOR_RE = re.compile(r"from\s+cendor[.\s]|import\s+cendor|@cendor/")
+_BARE_IMPORT_RE = re.compile(r"(?:^|\n)[ \t]*import[ \t]+cendor[ \t]*(?:#.*)?(?:\n|$)")
+_STRAY_INIT_RE = re.compile(r"(?:^|[\\/])cendor[\\/]__init__\.py$")
+
+
+@dataclass
+class Finding:
+    severity: str  # "error" | "warn" | "info" | "ok"
+    title: str
+    detail: str
+    fix: str | None = None
+    locations: list[str] = field(default_factory=list)
+
+
+@dataclass
+class DoctorResult:
+    findings: list[Finding]
+    exit_code: int
+
+
+@dataclass
+class _Src:
+    py: list[tuple[str, str]]  # (path, text)
+    node: list[tuple[str, str]]
+
+
+def _read_all(paths: list[Path]) -> list[tuple[str, str]]:
+    out: list[tuple[str, str]] = []
+    for p in paths:
+        try:
+            out.append((str(p), p.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            continue
+    return out
+
+
+def _index(root: Path) -> _Src:
+    return _Src(
+        py=_read_all(walk_source(root, PY_EXTS)), node=_read_all(walk_source(root, NODE_EXTS))
+    )
+
+
+def _usage(src: _Src) -> tuple[int, bool]:
+    count = 0
+    uses = False
+    for _, text in src.py + src.node:
+        count += len(_INSTRUMENT_RE.findall(text))
+        if _USES_CENDOR_RE.search(text):
+            uses = True
+    return count, uses
+
+
+def _check_stray_init(root: Path, src: _Src, out: list[Finding]) -> None:
+    stray = [rel(root, Path(p)) for p, _ in src.py if _STRAY_INIT_RE.search(p)]
+    if stray:
+        out.append(
+            Finding(
+                "error",
+                "A top-level cendor/__init__.py exists",
+                "`cendor` is a PEP 420 namespace package. A top-level `cendor/__init__.py` in your own "
+                "tree shadows the namespace and breaks every `from cendor.<tool> import ...`.",
+                "Delete the file. Each Cendor distribution owns only cendor/<tool>/, never cendor/__init__.py.",
+                stray,
+            )
+        )
+
+
+def _check_bare_import(root: Path, src: _Src, out: list[Finding]) -> None:
+    hits = [rel(root, Path(p)) for p, text in src.py if _BARE_IMPORT_RE.search(text)]
+    if hits:
+        out.append(
+            Finding(
+                "warn",
+                "Bare `import cendor`",
+                "`cendor` is a namespace with no module body, so `import cendor` imports nothing usable.",
+                "Import from the flat path instead, e.g. `from cendor.tokenguard import budget`.",
+                hits[:8],
+            )
+        )
+
+
+def _check_instrument(count: int, uses: bool, out: list[Finding]) -> None:
+    if uses and count == 0:
+        out.append(
+            Finding(
+                "warn",
+                "No instrument() call found",
+                "Cendor is imported but the provider client is never wrapped, so nothing is observed — "
+                "budgets, gating, and audit will all see zero calls.",
+                "Wrap the client once: `client = instrument(OpenAI())`.",
+            )
+        )
+
+
+def _check_money(root: Path, src: _Src, out: list[Finding]) -> None:
+    hits: list[str] = []
+    for p, text in src.py:
+        for line in text.splitlines():
+            if re.search(r"\bfloat\s*\(", line) and _MONEY_CONTEXT.search(line):
+                hits.append(rel(root, Path(p)))
+                break
+    for p, text in src.node:
+        for line in text.splitlines():
+            if (
+                re.search(r"\bNumber\s*\(", line) or ".toNumber()" in line
+            ) and _MONEY_CONTEXT.search(line):
+                hits.append(rel(root, Path(p)))
+                break
+    if hits:
+        out.append(
+            Finding(
+                "warn",
+                "Money coerced to a float / number",
+                "Cost and price values are Decimal / decimal.js on purpose — converting to float/number "
+                "reintroduces the rounding error the Decimal type exists to prevent.",
+                "Keep money as Decimal; format only at the edge with str().",
+                sorted(set(hits))[:8],
+            )
+        )
+
+
+def _check_py_providers(detected: Detected, src: _Src, out: list[Finding]) -> None:
+    used: set[str] = set()
+    for _, text in src.py:
+        used |= providers_used_in_source(text, "python")
+    for p in sorted(used):
+        present = p in detected.declared_providers or provider_installed(p)
+        if present:
+            continue
+        pkg = PYPI_PKG_FOR_PROVIDER.get(p, p)
+        extra = SDK_EXTRA_FOR_PROVIDER.get(p)
+        fix = (
+            f'pip install "cendor-sdk[{extra}]"  (or `pip install {pkg}`)'
+            if extra
+            else f"pip install {pkg}"
+        )
+        out.append(
+            Finding(
+                "error",
+                f'Provider SDK for "{p}" is used but not installed',
+                f"Your code imports the {p} SDK, but it is neither declared in pyproject/requirements "
+                "nor importable here. Cendor never pulls a provider SDK for you — it is an optional extra.",
+                fix,
+            )
+        )
+
+
+def _check_py_versions(detected: Detected, out: list[Finding]) -> None:
+    behind: list[str] = []
+    for name, ver in detected.installed_pypi.items():
+        latest = version_snapshot.PYPI.get(name)
+        have = clean_version(ver)
+        if latest and have and compare_versions(have, latest) < 0:
+            behind.append(f"{name} {have} (installed) < {latest}")
+    for name, spec in detected.declared_pypi.items():
+        if name in detected.installed_pypi:
+            continue
+        latest = version_snapshot.PYPI.get(name)
+        if latest and range_blocks_latest(spec, latest):
+            behind.append(f'{name} "{spec}" excludes {latest}')
+    if behind:
+        out.append(
+            Finding(
+                "warn",
+                "A Cendor package looks behind the latest release",
+                f"An installed or pinned version trails the bundled snapshot (as of {version_snapshot.AS_OF}). "
+                "Type Teach and fixes only arrive on upgrade. This is an offline hint — /releases is canonical.",
+                'pip install -U "cendor-sdk"  (check https://cendor.ai/releases)',
+                behind,
+            )
+        )
+
+
+def run_doctor(root: Path) -> DoctorResult:
+    root = Path(root)
+    detected = detect_project(root)
+    src = _index(root)
+    count, uses = _usage(src)
+    findings: list[Finding] = []
+
+    _check_stray_init(root, src, findings)
+    _check_bare_import(root, src, findings)
+    _check_instrument(count, uses, findings)
+    _check_money(root, src, findings)
+
+    if detected.python:
+        _check_py_providers(detected, src, findings)
+        _check_py_versions(detected, findings)
+
+    if detected.node:
+        findings.append(
+            Finding(
+                "info",
+                "Node project detected",
+                "This CLI checks the Python ecosystem exactly. For the npm ecosystem (peer deps, "
+                "@cendor/* versions), run `npx @cendor/init doctor` from the same project.",
+            )
+        )
+
+    has_cendor = (
+        uses
+        or bool(detected.installed_pypi)
+        or bool(detected.declared_pypi)
+        or bool(detected.declared_npm)
+    )
+    if not has_cendor:
+        findings.insert(
+            0,
+            Finding(
+                "info",
+                "No Cendor usage detected",
+                "Found no Cendor imports or dependencies in this project — nothing to validate.",
+                "Run `uvx cendor-init` to wire Cendor + your AI assistant in one step.",
+            ),
+        )
+    elif not any(f.severity in ("error", "warn") for f in findings):
+        findings.append(
+            Finding(
+                "ok",
+                "Wiring looks good",
+                f"Cendor usage found{f', instrument() called {count}×' if count else ''}; no problems detected.",
+            )
+        )
+
+    exit_code = 1 if any(f.severity == "error" for f in findings) else 0
+    return DoctorResult(findings=findings, exit_code=exit_code)
+
+
+SEVERITY_RANK = {"error": 0, "warn": 1, "info": 2, "ok": 3}

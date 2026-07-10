@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cendor-init"
+version = "0.1.0"
+description = "Offline CLI to make your project Cendor-ready and Cendor-fluent for your AI assistant (init) and catch wiring mistakes (doctor). Run with `uvx cendor-init`."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Raghav Mishra (PowerAI Labs)" }]
+keywords = ["cendor", "cli", "init", "scaffold", "ai-assistant", "copilot", "cursor", "claude-code", "mcp", "llm"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Software Development :: Code Generators",
+]
+# Offline + dependency-light by design: stdlib only (argparse, importlib.metadata, pathlib, re, json).
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+
+[project.urls]
+Homepage = "https://cendor.ai/docs/for-ai-assistants"
+Repository = "https://github.com/cendorhq/cendor-sdk"
+Issues = "https://github.com/cendorhq/cendor-sdk/issues"
+
+[project.scripts]
+cendor-init = "cendor_init.cli:main"
+
+# This is a SELF-CONTAINED package living inside the cendor-sdk repo (dev tooling, published
+# separately at the launch gate). It ships `cendor_init` — a standalone top-level package, NOT part
+# of the `cendor.*` PEP 420 namespace — so it never collides with cendor-sdk's `cendor/sdk`. It is
+# NOT a uv workspace member: `uv build` it from this directory; the cendor-sdk build/release is
+# untouched (mirrors how cendor-mcp keeps its Python twin standalone).
+[tool.hatch.build.targets.wheel]
+packages = ["src/cendor_init"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# The rules templates + scaffolds are VERBATIM vendored copy (kept identical to the docs source of
+# truth); their bullet lines legitimately run past 100 cols. This is embedded text, not code width.
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.10"
