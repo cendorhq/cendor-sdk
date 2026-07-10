@@ -499,19 +499,20 @@ agent = Agent(
 
 <!-- tab: TypeScript -->
 
-<!-- ts-check: skip -->
-
 ```ts
-// `rules.intent` / `rules.customCategory` / `presets` ship in @cendor/guardrails 0.4+; the SDK
-// re-export rides the next @cendor/sdk release. Until then import them from @cendor/guardrails.
-import { rules, presets } from '@cendor/guardrails';
+import { rules, presets } from '@cendor/sdk';
+
+const rail = rules.intent({ support: ['reset my password'] }, { embed, mode: 'allow', action: 'flag' });
+const starter = presets.promptInjection();
+const cat = rules.customCategory('code_requests', ['write a program'], embed, { action: 'flag' });
 ```
 
 <!-- /tabs -->
 
-> **Parity:** the SDK re-export of `intent` / `custom_category` / `presets` is Python-first; the TS
-> SDK surface rides the next `@cendor/sdk` release (import from `@cendor/guardrails` meanwhile). The
-> zero-config `local_embedder` is Python-only (model2vec); in TS pass a bring-your-own `embed`.
+> **Parity:** `intent` / `customCategory` / `presets` / `policySchema` are re-exported on the SDK
+> surface in **both** languages (`@cendor/sdk` >= 0.8.0). The zero-config local embedder differs by
+> backend — Python `local_embedder` (model2vec, sync); TS `localEmbedder` (transformers.js, async, an
+> optional peer) — so `embed` may be sync or async (an async embed runs on the SDK's async loop).
 
 ## Reference
 
