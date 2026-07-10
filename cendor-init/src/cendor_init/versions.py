@@ -23,4 +23,6 @@ PYPI: dict[str, str] = {
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
     "cendor-sdk": "1.6.1",
+    "cendor-mcp": "0.1.1",
+    "cendor-init": "0.1.1",
 }

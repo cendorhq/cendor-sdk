@@ -51,4 +51,15 @@ works in CI:
 uvx cendor-init --help
 ```
 
+## Options
+
+| Flag | Effect |
+|---|---|
+| `--all` | write every assistant rules file, not just the detected ones |
+| `--assistant <list>` | comma-separated subset: `copilot,cursor,agents,claude,windsurf` |
+| `--mcp` | also drop MCP connect config where absent |
+| `--scaffold` | also write a correct `instrument()`+budget starter |
+| `--force` | overwrite an owned file (`.cursor/rules/cendor.mdc`) even if not ours |
+| `--dry-run` | show what would change without writing |
+
 Apache-2.0 · [cendor.ai](https://cendor.ai) · [For AI assistants](https://cendor.ai/docs/for-ai-assistants) · [MCP](https://cendor.ai/mcp)

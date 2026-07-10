@@ -12,4 +12,4 @@ from .doctor import run_doctor
 from .initialize import run_init
 
 __all__ = ["run_init", "run_doctor", "__version__"]
-__version__ = "0.1.0"
+__version__ = "0.1.1"

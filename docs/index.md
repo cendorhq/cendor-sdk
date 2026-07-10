@@ -5,6 +5,10 @@ governance — budgets, tamper-evident audit, PII redaction, record/replay testi
 foundation, not a plugin. Local-first · no servers · Apache-2.0. Available for
 **Python** (`pip install cendor-sdk`) and **TypeScript/JavaScript** (`npm i @cendor/sdk`).
 
+> **Building with Copilot, Claude Code, or Cursor?** The SDK ships inline Type Teach and a
+> paste-in trap sheet → [For AI assistants](/docs/for-ai-assistants), or wire it in one command
+> with `npx @cendor/init` / `uvx cendor-init`.
+
 ## A first look
 
 A budget-capped run in both languages — the answer comes back with a real cost receipt, and an

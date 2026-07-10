@@ -37,7 +37,7 @@ def _version() -> str:
 
         return metadata.version("cendor-init")
     except Exception:
-        return "0.1.0"
+        return "0.1.1"
 
 
 def _parse_assistants(raw: list[str] | None) -> list[str] | None:
@@ -154,7 +154,6 @@ def _add_init_args(p: argparse.ArgumentParser) -> None:
         "--force", action="store_true", help="overwrite an owned file (.cursor/rules/cendor.mdc)"
     )
     p.add_argument("--dry-run", action="store_true", help="show what would change without writing")
-    p.add_argument("-y", "--yes", action="store_true", help=argparse.SUPPRESS)
 
 
 def _force_utf8() -> None:

@@ -44,6 +44,8 @@ pip install "cendor-sdk[openai,anthropic]"     # provider SDKs are optional extr
 pip install "cendor-sdk[all]"                  # every provider + interop, batteries included
 ```
 
+Using an AI coding assistant? `npx @cendor/init` (TS) / `uvx cendor-init` (Python) wires it up — or point it at [cendor.ai/docs/for-ai-assistants](https://cendor.ai/docs/for-ai-assistants).
+
 The install bundles the whole Cendor stack (`cendor-core`, `tokenguard`, `acttrace`, `contextkit`,
 `squeeze`, `cassette`) by dependency — you install once and import only from `cendor.sdk`. Provider
 SDKs stay optional extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`, `[ollama]`,

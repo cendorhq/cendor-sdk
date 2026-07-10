@@ -4,6 +4,15 @@ Install the SDK, run one governed agent, and learn where each concept lives. Ten
 one API key (or none — the [ungoverned example](#3-run-it-ungoverned--core-only) works offline
 with a recorded cassette).
 
+**Using an AI coding assistant?** Cendor's types teach the correct call-shape inline (on hover and
+completion), so Copilot / Claude / Cursor get it right as you type — and there's a trap-sheet you can
+paste into your assistant: [For AI assistants](/docs/for-ai-assistants).
+
+**Fastest start.** `npx @cendor/init` (Node) or `uvx cendor-init` (Python) wires Cendor **and** your
+AI assistant in one step — it detects your project, writes the correct assistant rules files, can add
+the MCP config, and scaffolds a working `instrument()` call. Offline, no key. A companion
+`… doctor` catches wiring mistakes before they bite. See [For AI assistants](for-ai-assistants.md).
+
 ## 1. Install
 
 <!-- tabs: lang -->

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cendor-init"
-version = "0.1.0"
+version = "0.1.1"
 description = "Offline CLI to make your project Cendor-ready and Cendor-fluent for your AI assistant (init) and catch wiring mistakes (doctor). Run with `uvx cendor-init`."
 readme = "README.md"
 requires-python = ">=3.10"
