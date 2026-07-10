@@ -4,6 +4,17 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-07-11
+AI-assistant onboarding: inline Type Teach ships inside the package, plus the bundled
+integration guide. No runtime behavior change for correct code.
+
+### Added
+- Inline `@example` + correct-shape signatures on the public API (`Agent`, `run`, `SQLiteSessionStore`,
+  re-exported `rules`/`judge`), so your editor's language server — and agent-mode assistants — is handed
+  the right call as you type. Includes the `SQLiteSessionStore` ↔ `SqliteSessionStore` casing note.
+- `INTEGRATION.md` is now bundled in the installed package — a one-screen "call Cendor correctly"
+  guide. Full trap sheet: https://cendor.ai/docs/for-ai-assistants
+
 ## [1.6.0] — 2026-07-10
 V04 re-exports (plan-guardrails-v04). Additive and backward-compatible. Requires
 `cendor-guardrails>=1.4`.
