@@ -4,6 +4,22 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-07-10
+V04 re-exports (plan-guardrails-v04). Additive and backward-compatible. Requires
+`cendor-guardrails>=1.4`.
+
+### Added
+- **`rules.intent` + `rules.custom_category`** re-exported on the SDK's `rules` surface — the pre-LLM
+  intent gate (embedding / BYO-classifier backends) and the semantic category-by-example check land
+  in one import for `Agent(guardrails=[…])`. Bring your own `embed`/`classify` (or
+  `cendor.guardrails.embeddings.local_embedder` via the `[embeddings]` extra).
+- **`presets` + `policy_schema`** re-exported at the SDK top level (`from cendor.sdk import presets,
+  policy_schema`): the curated `presets.prompt_injection()` starter and the shipped policy JSON
+  Schema (with `load_policy(..., validate=True)`).
+- **G1 matching options ride along** — `rules.keyword_deny(..., match="word", normalize=(…))` is
+  available through the re-exported rule. No runner change; these are library capabilities surfaced
+  through the SDK façade. No new claim (all capability-neutral; catch-rate/accuracy gates stay shut).
+
 ## [1.5.0] — 2026-07-09
 V03 Tier-A wiring (plan-guardrails-v03). Additive and backward-compatible. Requires
 `cendor-guardrails>=1.3`.

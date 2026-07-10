@@ -464,6 +464,55 @@ import { rules, loadPolicy } from '@cendor/guardrails';
 
 <!-- /tabs -->
 
+### Semantic categories & intent screening
+[cendor-guardrails](/docs/guardrails) 1.4+ adds two checks that gate by **meaning**, not literal
+words — both re-exported on the SDK's `rules` (Python). `rules.custom_category(name, examples,
+embed=…)` trips on a paraphrase a deny-list misses (the local counterpart to Azure's *rapid custom
+categories*), and `rules.intent(intents, embed=…|classify=…, mode="deny"|"allow")` is a first-class
+pre-LLM intent gate — deny topics you never serve, or `mode="allow"` to gate anything off-topic.
+`presets.prompt_injection()` gives a curated starter deny-list, and `keyword_deny(match="word",
+normalize=…)` hardens the literal matcher. Neither carries an accuracy claim; keep them `flag` until
+you calibrate.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+<!-- ts-check: skip -->
+
+```python
+from cendor.sdk import Agent, presets, rules
+from cendor.guardrails import embeddings
+
+embed = embeddings.local_embedder()   # pip install 'cendor-guardrails[embeddings]'
+agent = Agent(
+    name="support",
+    instructions="Answer only account & billing questions.",
+    guardrails=[
+        presets.prompt_injection(),                                       # curated injection starter
+        rules.intent({"support": ["reset my password"], "billing": ["update my card"]},
+                     embed=embed, mode="allow", action="flag"),           # off-topic gate
+        rules.custom_category("code_requests", ["write a program", "build an app"],
+                              embed=embed, action="flag"),
+    ],
+)
+```
+
+<!-- tab: TypeScript -->
+
+<!-- ts-check: skip -->
+
+```ts
+// `rules.intent` / `rules.customCategory` / `presets` ship in @cendor/guardrails 0.4+; the SDK
+// re-export rides the next @cendor/sdk release. Until then import them from @cendor/guardrails.
+import { rules, presets } from '@cendor/guardrails';
+```
+
+<!-- /tabs -->
+
+> **Parity:** the SDK re-export of `intent` / `custom_category` / `presets` is Python-first; the TS
+> SDK surface rides the next `@cendor/sdk` release (import from `@cendor/guardrails` meanwhile). The
+> zero-config `local_embedder` is Python-only (model2vec); in TS pass a bring-your-own `embed`.
+
 ## Reference
 
 | Name | Signature | What it does |
@@ -475,6 +524,8 @@ import { rules, loadPolicy } from '@cendor/guardrails';
 | `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
 | `rules.*` | `keyword_deny` / `regex_rule` / `spotlight` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes); `spotlight` wraps untrusted content in a trust-lowering delimiter |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
+| `rules.custom_category` / `rules.intent` | semantic-by-example / pre-LLM intent gate (BYO `embed` or `classify`) | catch a paraphrase / gate off-topic requests before the model runs — no accuracy claim |
+| `presets` / `policy_schema` | `presets.prompt_injection()` starter + the policy JSON Schema | a curated injection starter (not detection) + `load_policy(validate=True)` |
 | `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (needs the underlying `cendor-guardrails[promptguard]` extra; Python-only) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
 | `rules.bedrock_guardrail` / `azure_content_safety` / `model_armor` | hosted rails (BYO cloud client) | AWS ApplyGuardrail / Azure Prompt Shields / Google Model Armor — metered by the vendor; verdict emits a local `guardrail_decision` |
 | `rules.groundedness` / `denied_topics` | similarity checks (BYO `embed`) | RAG-hallucination gate / off-topic gate over cosine similarity — no bundled model |

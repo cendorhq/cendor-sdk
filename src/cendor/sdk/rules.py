@@ -29,8 +29,10 @@ from cendor.guardrails.rules import (
     bedrock_guardrail,
     classifier,
     custom,
+    custom_category,
     denied_topics,
     groundedness,
+    intent,
     json_schema,
     keyword_deny,
     language,
@@ -67,6 +69,9 @@ __all__ = [
     # similarity checks over a BYO embedding fn (re-exported from cendor.guardrails)
     "groundedness",
     "denied_topics",
+    "custom_category",
+    # pre-LLM intent screening (re-exported from cendor.guardrails)
+    "intent",
     # acttrace-bridged detector guardrails (SDK-only)
     "pii",
     "secrets",
