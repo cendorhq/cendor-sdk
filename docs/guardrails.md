@@ -215,8 +215,6 @@ agent = Agent(name="travel", model="gpt-4o", instructions="Book flights only.", 
 
 <!-- tab: TypeScript -->
 
-<!-- ts-check: skip -->
-
 ```ts
 import { Agent, judge, rules } from '@cendor/sdk';
 
