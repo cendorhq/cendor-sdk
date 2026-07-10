@@ -1,0 +1,35 @@
+name: Release init CLI
+
+# Publishes the `cendor-init` CLI (the standalone package in cendor-init/) to PyPI via OIDC
+# **trusted publishing**. Kept SEPARATE from release.yml — which tag-publishes the cendor-sdk package
+# at the repo root — so cendor-init versions and ships independently and the cendor-sdk release path
+# stays untouched. cendor-init has no docs dependency (templates are plain .py constants), so this
+# needs no docs token — just `uv build` + OIDC upload.
+#
+# Trusted publisher to configure on PyPI (pending publisher, since the project is new):
+#   PyPI project: cendor-init · Owner: cendorhq · Repository: cendor-sdk
+#   Workflow: release-init.yml · Environment: init
+#
+# MANUAL ONLY for now (workflow_dispatch) — held for the launch gate.
+on:
+  workflow_dispatch:
+
+concurrency: release-init-${{ github.ref }}
+
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: init # matches the PyPI trusted publisher
+    permissions:
+      id-token: write # OIDC trusted publishing — no stored token
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@caf0cab7a618c569241d31dcd442f54681755d39 # v3
+      - name: Build cendor-init (wheel + sdist)
+        working-directory: cendor-init
+        run: uv build
+      - name: Publish to PyPI (OIDC trusted publishing)
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # release/v1
+        with:
+          packages-dir: cendor-init/dist
