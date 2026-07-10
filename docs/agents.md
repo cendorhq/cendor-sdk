@@ -325,10 +325,10 @@ graph TD
     ASM["assemble context<br/>(session history; contextkit if context_budget set)"]
     FMT["format for the provider<br/>(messages + tool schemas)"]
     CALL["the model call<br/>inside trace(run_id)"]
-    PRE["pre-flight: budget / guard<br/>(block · downgrade · redact)"]
+    PRE["pre-flight: budget / guard / guardrails<br/>(input gate · block · downgrade · redact)"]
     NORM["normalize the response<br/>(one canonical shape)"]
     TOOLS{"tool calls<br/>requested?"}
-    EXEC["execute tools<br/>(a ToolCall per call, on the bus)"]
+    EXEC["execute tools<br/>(a ToolCall per call, on the bus;<br/>guardrails gate tool_call + tool_output)"]
     DONE["finalize -> Result<br/>(output · steps · usage · cost)"]
 
     IN --> ASM --> FMT --> PRE --> CALL --> NORM --> TOOLS
@@ -348,8 +348,9 @@ subscriber — budgets, audit, cassette — sees the same correlated events.
 
 The loop *is* the composition point: `context_budget` pulls in
 [`contextkit`](/docs/contextkit) (and [`squeeze`](/docs/squeeze) when installed), governance
-wrappers pull in [`tokenguard`](/docs/tokenguard) and [`acttrace`](/docs/acttrace), and
-[`cassette`](/docs/cassette) records/replays the whole trajectory. All through
+wrappers pull in [`tokenguard`](/docs/tokenguard) and [`acttrace`](/docs/acttrace),
+[`Agent(guardrails=[…])`](guardrails.md) attaches the [`cendor-guardrails`](/docs/guardrails)
+four-stage gate, and [`cassette`](/docs/cassette) records/replays the whole trajectory. All through
 [`cendor-core`](/docs/core)'s seams — the SDK contains no governance logic of its own.
 
 ## Honest limits

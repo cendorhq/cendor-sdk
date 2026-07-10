@@ -180,9 +180,10 @@ report(['agent']).assertUnder(1.00, { agent: 'deep' });
 
 <!-- /tabs -->
 
-A team-wide cap is just an ordinary [`budget(...)`](governance.md#budgets) around the whole
-`run([...])`. Long team runs can also checkpoint and resume — see
-[Production hardening](hardening.md#checkpointed--resumable-runs).
+Per-agent budgets (`max_usd`), `track(agent=…)`, and `report()` are the [tokenguard](/docs/tokenguard)
+budget/attribution API scoped to each segment. A team-wide cap is just an ordinary
+[`budget(...)`](governance.md#budgets) around the whole `run([...])`. Long team runs can also
+checkpoint and resume — see [Production hardening](hardening.md#checkpointed--resumable-runs).
 
 ## How it works
 
@@ -214,7 +215,10 @@ same structure as OpenTelemetry `gen_ai.*` spans.
 
 Multi-turn team memory works exactly like single-agent memory — pass a `Session`
 ([Memory & sessions](memory.md)). Governance wrappers apply at whichever granularity you choose:
-around the team (`budget`/`guard`), or per agent (`max_usd`, per-segment audit decisions).
+around the team (`budget`/`guard`), or per agent (`max_usd`, per-segment audit decisions). The
+shared `AuditLog` chain and the per-segment `decision()` that correlates each agent's steps are
+[acttrace](/docs/acttrace); the per-agent budgets and spend attribution are
+[tokenguard](/docs/tokenguard).
 
 ## Honest limits
 

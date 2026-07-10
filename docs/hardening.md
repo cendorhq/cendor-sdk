@@ -4,6 +4,39 @@ The "safe for real workloads" layer: retries with backoff for transient failures
 runs that resume after a crash, and durable local memory. All local-first — no new failure modes
 your provider SDK doesn't already have.
 
+## Quickstart
+
+One run that retries transient failures **and** checkpoints each turn — so a crash resumes from the
+saved state instead of starting over (and completed tools don't re-run):
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, run, RetryPolicy
+
+agent = Agent(name="assistant", model="gpt-4o", instructions="…")
+result = run(
+    agent, "a long task",
+    retry=RetryPolicy(max_attempts=5),   # transient failures only — never governance decisions
+    checkpoint="run.ckpt.json",          # resume from here if the process crashes
+)
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, run, RetryPolicy } from '@cendor/sdk';
+
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', instructions: '…' });
+const result = await run(agent, 'a long task', {
+  retry: new RetryPolicy({ maxAttempts: 5 }),   // transient failures only — never governance decisions
+  checkpoint: 'run.ckpt.json',                   // resume from here if the process crashes
+});
+```
+
+<!-- /tabs -->
+
 ## Core concepts
 
 ### Retries & backoff — `RetryPolicy`

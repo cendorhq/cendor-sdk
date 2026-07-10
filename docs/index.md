@@ -62,7 +62,7 @@ mix them in the same process); it's continuous, never a migration.
 graph TD
     APP["your application"]
     SDK["cendor-sdk<br/>Agent · tool · run"]
-    LIBS["the seven libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
+    LIBS["six libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
     CORE["cendor-core<br/>instrument() seam + event bus"]
     PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
 
@@ -95,18 +95,35 @@ graph TD
 ## What "governed" means here
 
 Five production concerns ride every run without per-call wiring, because the SDK executes each
-model and tool call through [`cendor-core`](/docs/core)'s event bus:
+model and tool call through [`cendor-core`](/docs/core)'s event bus. Each concern is owned by one
+of the libraries the SDK bundles — the SDK adds no governance logic of its own, it just wires them
+to the loop:
 
 - **Cost** — [`budget(...)`](governance.md#budgets) caps a run *before* an over-budget call executes;
-  [`track(...)`](governance.md#attribution) attributes spend per feature/user for free.
+  [`track(...)`](governance.md#attribution) attributes spend per feature/user for free. Owned by
+  [tokenguard](/docs/tokenguard).
 - **Safety** — [`Agent(guardrails=[…])`](guardrails.md) gates input / tool calls / tool output /
-  output with deterministic checks: block (fail-closed, pre-spend at input), redact, or flag.
+  output with deterministic checks: block (fail-closed, pre-spend at input), redact, or flag. Owned
+  by [cendor-guardrails](/docs/guardrails).
 - **Evidence** — an [`AuditLog`](governance.md#audit--redaction) records every step in a
-  tamper-evident hash chain you can `verify()` offline.
+  tamper-evident hash chain you can `verify()` offline. Owned by [acttrace](/docs/acttrace).
 - **Privacy** — [`guard(Policy...)`](governance.md#audit--redaction) redacts PII before the
-  provider ever sees it.
+  provider ever sees it. Also [acttrace](/docs/acttrace).
 - **Testability** — [`cassette`](governance.md#testing--record-once-replay-forever) records a run
-  once and replays it forever: offline, deterministic, free.
+  once and replays it forever: offline, deterministic, free. Owned by [cassette](/docs/cassette).
+
+Context assembly is governed too: `Agent(context_budget=…)` fits history to a token budget through
+[contextkit](/docs/contextkit) (and [squeeze](/docs/squeeze) when installed). The full map of which
+SDK surface each library powers:
+
+| SDK surface | Library | Learn more |
+|---|---|---|
+| `Agent(context_budget=…)` — fit history to a token budget | contextkit (+ squeeze when installed) | [/docs/contextkit](/docs/contextkit), [/docs/squeeze](/docs/squeeze) |
+| `budget()` / `track()` / price estimation | tokenguard | [/docs/tokenguard](/docs/tokenguard) |
+| `Agent(guardrails=[…])` / `rules.*` — the four-stage gate | cendor-guardrails | [/docs/guardrails](/docs/guardrails) |
+| `guard(Policy…)` / `AuditLog` / `decision()` | acttrace | [/docs/acttrace](/docs/acttrace) |
+| `cassette` record/replay / `EvalCase` | cassette | [/docs/cassette](/docs/cassette) |
+| the event bus / `instrument()` / provider detection | cendor-core | [/docs/core](/docs/core) |
 
 Every layer is optional — an ungoverned `run()` works with just `cendor-core` installed.
 

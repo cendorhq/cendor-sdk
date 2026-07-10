@@ -173,9 +173,10 @@ const result = await using('tests/fixtures/run.json', () =>   // records once, r
 
 <!-- /tabs -->
 
-Replay is deterministic and offline — the same trajectory every time, no network, no keys — and
-replayed calls re-emit their recorded usage, so **cost and tokens are real on replay**. That's
-what makes spend a testable property; the [eval harness](eval.md) builds directly on it.
+Record/replay is the [cassette](/docs/cassette) library, re-exported through the SDK. Replay is
+deterministic and offline — the same trajectory every time, no network, no keys — and replayed
+calls re-emit their recorded usage, so **cost and tokens are real on replay**. That's what makes
+spend a testable property; the [eval harness](eval.md) builds directly on it.
 
 ## How it works
 
@@ -190,6 +191,7 @@ bare instrumented client, and in both languages:
 | `track` / `report` | bus subscriber | after usage lands |
 | `guard(Policy...)` | pre-flight interceptor | before the request leaves |
 | `AuditLog` | bus subscriber | every event, appended to the chain |
+| [`Agent(guardrails=[…])`](guardrails.md) | in-loop gate (the [cendor-guardrails](/docs/guardrails) Gate) | four stages: input / tool_call / tool_output / output |
 | `cassette` | subscriber (record) + interceptor (replay) | around the call |
 
 ## Honest limits
@@ -205,6 +207,6 @@ bare instrumented client, and in both languages:
   not per-call or per-agent, so in a concurrent server they scope around your whole app rather than
   one request — install policy once at startup, don't toggle it per request. For **per-agent,
   per-run** gating (keyword / regex / URL / length / schema, at four stages) use
-  [`Agent(guardrails=[…])`](guardrails.md) instead — it is scoped to the agent and overridable per
-  run, and records to the same audit chain.
+  [`Agent(guardrails=[…])`](guardrails.md) instead — the [cendor-guardrails](/docs/guardrails) Gate,
+  scoped to the agent and overridable per run, recording to the same audit chain.
 - **Evidence, not compliance.** The audit chain supports a compliance case; it doesn't make one.

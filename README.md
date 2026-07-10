@@ -95,7 +95,7 @@ Both doors expose the **same primitives** — start on the SDK and drop down to 
 graph TD
     APP["your application"]
     SDK["cendor-sdk<br/>Agent · tool · run"]
-    LIBS["the seven libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
+    LIBS["six libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
     CORE["cendor-core<br/>instrument() seam + event bus"]
     PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
 

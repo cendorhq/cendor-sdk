@@ -26,10 +26,10 @@ with cassette.using("evals/weather.json", mode="record"):
 <!-- tab: TypeScript -->
 
 ```ts
-import * as cassette from '@cendor/cassette';
+import { using } from '@cendor/cassette';
 import { run } from '@cendor/sdk';
 
-await cassette.using('evals/weather.json', { mode: 'record' }, () =>
+await using('evals/weather.json', { mode: 'record' }, () =>
   run(agent, "What's the weather in Paris?"));
 ```
 

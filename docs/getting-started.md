@@ -15,7 +15,10 @@ pip install "cendor-sdk[openai,anthropic]"
 
 Provider SDKs are optional extras — `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`,
 `[ollama]`, `[huggingface]`, `[azure]`, `[foundry-local]`, plus `[mcp]`, `[otel]`, and `[all]`.
-The install bundles the whole Cendor stack by dependency; import only from `cendor.sdk`.
+The install pulls in the seven libraries the SDK is built on — [cendor-core](/docs/core) (the
+`instrument()` seam + event bus), [contextkit](/docs/contextkit), [squeeze](/docs/squeeze),
+[tokenguard](/docs/tokenguard), [cendor-guardrails](/docs/guardrails), [cassette](/docs/cassette),
+and [acttrace](/docs/acttrace) — by dependency; import only from `cendor.sdk`.
 
 <!-- tab: TypeScript -->
 
@@ -84,15 +87,22 @@ console.log(result.toolSteps.map((s) => s.name));    // ["get_weather"]
 
 <!-- /tabs -->
 
-What each line buys you:
+What each line buys you (and the library it comes from):
 
 - `@tool` / `tool(...)` — the JSON Schema comes from type hints + docstring (Python) or a zod
   schema (TS); it's formatted per provider automatically.
-- `budget(usd=0.25, on_exceed="block")` — a **pre-flight** cap: the over-budget call never runs.
-- `guard(Policy.default(), ...)` — PII is redacted **before** the provider sees it.
+- `budget(usd=0.25, on_exceed="block")` — a **pre-flight** cap: the over-budget call never runs
+  (from [tokenguard](/docs/tokenguard)).
+- `guard(Policy.default(), ...)` — PII is redacted **before** the provider sees it (from
+  [acttrace](/docs/acttrace)).
 - `AuditLog(...)` — every model and tool call lands in a tamper-evident hash chain
-  (`verify("audit.jsonl")` checks it offline).
-- `result.cost` — decimal money, never a float, aggregated across the whole run.
+  (`verify("audit.jsonl")` checks it offline) (from [acttrace](/docs/acttrace)).
+- `result.cost` — decimal money, never a float, aggregated across the whole run (priced by
+  [tokenguard](/docs/tokenguard)).
+
+Not shown here but one argument away: `Agent(context_budget=…)` fits history to a token budget via
+[contextkit](/docs/contextkit)/[squeeze](/docs/squeeze), and `Agent(guardrails=[…])` gates the loop
+with [cendor-guardrails](/docs/guardrails).
 
 ## 3. Run it ungoverned — core only
 
@@ -151,17 +161,20 @@ regression tests.
 
 ## 5. Where each concept lives
 
-| I want to… | Go to |
-|---|---|
-| Understand `Agent`, `tool`, `run`, `Result` | [Agents & the loop](agents.md) |
-| Cap spend, attribute cost, audit, redact | [Governance](governance.md) |
-| Make the agent remember across turns/processes | [Memory & sessions](memory.md) |
-| Give the agent my documents | [Retrieval (RAG)](rag.md) |
-| Use more than one agent | [Multi-agent](multi-agent.md) |
-| Connect Gemini / Bedrock / Ollama / Hugging Face / Azure | [Providers](providers.md) |
-| Consume MCP tools, serve A2A, emit OTel spans | [Ecosystem & interop](interop.md) |
-| Survive crashes, retries, long runs | [Production hardening](hardening.md) |
-| Gate regressions in CI | [Eval & regression testing](eval.md) |
+| I want to… | Go to | Library underneath |
+|---|---|---|
+| Understand `Agent`, `tool`, `run`, `Result` | [Agents & the loop](agents.md) | [cendor-core](/docs/core) |
+| Cap spend, attribute cost | [Governance](governance.md) | [tokenguard](/docs/tokenguard) |
+| Audit, redact PII | [Governance](governance.md) | [acttrace](/docs/acttrace) |
+| Block / redact / flag at four stages | [Guardrails](guardrails.md) | [cendor-guardrails](/docs/guardrails) |
+| Fit history to a token budget | [Agents & the loop](agents.md#core-concepts) | [contextkit](/docs/contextkit) + [squeeze](/docs/squeeze) |
+| Make the agent remember across turns/processes | [Memory & sessions](memory.md) | [contextkit](/docs/contextkit) |
+| Give the agent my documents | [Retrieval (RAG)](rag.md) | [contextkit](/docs/contextkit) |
+| Use more than one agent | [Multi-agent](multi-agent.md) | — (SDK orchestration) |
+| Connect Gemini / Bedrock / Ollama / Hugging Face / Azure | [Providers](providers.md) | [cendor-core](/docs/core) |
+| Consume MCP tools, serve A2A, emit OTel spans | [Ecosystem & interop](interop.md) | [cendor-core](/docs/core) |
+| Survive crashes, retries, long runs | [Production hardening](hardening.md) | — (SDK) |
+| Record once / replay; gate regressions in CI | [Eval & regression testing](eval.md) | [cassette](/docs/cassette) |
 
 > **Coming from the libraries?** Everything you already use — `budget`, `track`, `guard`,
 > `Policy`, `AuditLog`, `trace` — is the same object here, re-exported for one-import convenience.

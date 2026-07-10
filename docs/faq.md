@@ -15,7 +15,8 @@ Pick by what you already have:
 ## Can I use both at the same time?
 
 Yes — they're the same objects. `budget`, `track`, `guard`, `Policy`, `AuditLog`, and `trace`
-re-exported from `cendor.sdk` **are** the tokenguard/acttrace originals, so a `budget()` opened
+re-exported from `cendor.sdk` **are** the [tokenguard](/docs/tokenguard)/[acttrace](/docs/acttrace)
+originals, so a `budget()` opened
 around an SDK `run()` also caps a bare instrumented client call in the same scope, and one
 `AuditLog` records both. A common mix: the SDK runs the agent loop, while a separately
 `instrument()`-ed client handles non-agent calls (embeddings, one-shot completions) — one budget,

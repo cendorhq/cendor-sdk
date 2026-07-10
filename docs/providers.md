@@ -22,9 +22,9 @@ governance don't change.
 
 Normalization is isolated in `providers.py` (Python) / `providers.ts` (TypeScript) with
 per-provider fixtures, so response-shape drift is contained. **All ten paths ship in `@cendor/sdk`**
-behind the same `Provider` seam — Hugging Face, Ollama, Gemini, and Bedrock drive the model today,
-with their end-to-end token/cost capture in JS activating alongside the matching `@cendor/core`
-detection release. See the [parity matrix](/docs/languages).
+behind the same `Provider` seam — Hugging Face, Ollama, Gemini, and Bedrock drive the model with
+end-to-end token/cost capture in TypeScript today, via `@cendor/core`'s provider detection. See the
+[parity matrix](/docs/languages).
 
 **Async (`run.aio`)** runs natively for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging
 Face. Google Gemini and AWS Bedrock have no native async client in their SDKs, so `run.aio` executes
@@ -94,15 +94,17 @@ await withBudget({ usd: 0.10, onExceed: 'block' }, () =>
 
 <!-- /tabs -->
 
-Or use a `tokens=` cap (tokens are counted regardless of price), or
+`register_model_price` and `configure(on_unpriced=…)` are [tokenguard](/docs/tokenguard)'s price
+table, re-exported through the SDK — the same rates that price every `Result.cost` and bind every
+`budget()`. Or use a `tokens=` cap (tokens are counted regardless of price), or
 `configure(on_unpriced="raise")` to reject unpriced calls outright.
 
 ## Hugging Face
 
-> **TypeScript usage capture.** All three providers below ship in `@cendor/sdk`. Azure AI Foundry
-> and Foundry Local wrap the standard `openai` client, so cost and usage are captured end-to-end in
-> TypeScript today; Hugging Face parses responses now, with token/cost capture arriving alongside the
-> matching `@cendor/core` detection. See the [parity matrix](/docs/languages).
+> **TypeScript usage capture.** All three providers below ship in `@cendor/sdk` with end-to-end
+> cost and usage capture in TypeScript today — Azure AI Foundry and Foundry Local wrap the standard
+> `openai` client, and Hugging Face is one of the providers `@cendor/core` detects directly. See the
+> [parity matrix](/docs/languages).
 
 Uses `huggingface_hub.InferenceClient.chat_completion` — the response is OpenAI-shaped, and the
 call is attributed to `huggingface`, not `openai`. The `model` is a Hub id or an Inference
@@ -312,6 +314,7 @@ counting, price sources, OTel ingestion — live in the library docs:
   Hub/deployment names, and guessing wrong would mis-attribute cost.
 - **Deployment-name models start unpriced** — register a rate or budgets can't bind
   ([above](#pricing-unpriced-models)).
-- **TypeScript ships all ten provider paths** behind the same seam. Hugging Face / Ollama /
-  Gemini / Bedrock drive the model today; their end-to-end usage capture in JS lands with the
-  matching `@cendor/core` detection release — see the [parity matrix](/docs/languages).
+- **Async concurrency isn't uniform.** Gemini and Bedrock have no native async client, so
+  `run.aio` executes them synchronously (correct results, no concurrency win) — as noted above.
+  Usage capture itself is complete: all ten paths capture cost and tokens end-to-end in **both**
+  languages, via `@cendor/core`'s provider detection ([parity matrix](/docs/languages)).

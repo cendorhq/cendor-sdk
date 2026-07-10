@@ -6,13 +6,6 @@ checks are the deterministic, offline [`cendor-guardrails`](/docs/guardrails) ru
 from `cendor.sdk` for one-import convenience. Every decision lands on the same tamper-evident audit
 chain the rest of the SDK writes to.
 
-> **Deterministic ≠ adversarial protection.** The built-in rules catch what you configure —
-> keywords, patterns, hosts, sizes, shapes. They do **not** stop a novel jailbreak. Layer the higher
-> detection tiers you need — a local classifier, a bring-your-own `rules.llm_judge`, or a hosted rail
-> (`rules.bedrock_guardrail` / `azure_content_safety` / `model_armor`) — for open-ended risk. No
-> jailbreak-detection or PII-catch-rate claims are made without a reproduced, published benchmark —
-> see [Honest limits](#honest-limits) and the library [Threat model](/docs/guardrails#threat-model).
-
 ## Quickstart
 
 <!-- tabs: lang -->
@@ -62,6 +55,13 @@ try {
 ```
 
 <!-- /tabs -->
+
+> **Deterministic ≠ adversarial protection.** The built-in rules catch what you configure —
+> keywords, patterns, hosts, sizes, shapes. They do **not** stop a novel jailbreak. Layer the higher
+> detection tiers you need — a local classifier, a bring-your-own `rules.llm_judge`, or a hosted rail
+> (`rules.bedrock_guardrail` / `azure_content_safety` / `model_armor`) — for open-ended risk. No
+> jailbreak-detection or PII-catch-rate claims are made without a reproduced, published benchmark —
+> see [Honest limits](#honest-limits) and the library [Threat model](/docs/guardrails#threat-model).
 
 ## Core concepts
 
@@ -138,7 +138,7 @@ verify('audit.jsonl'); // the decision is inside the verified hash chain
 
 ### Guardrails vs `guard()`
 They are distinct and complementary. `Agent(guardrails=[…])` is **per-agent / per-run** deterministic
-gating at four stages (this page). [`guard(Policy…)`](governance.md#redaction) is the acttrace policy
+gating at four stages (this page). [`guard(Policy…)`](governance.md#audit--redaction) is the acttrace policy
 context manager — **process-global** PII/secret detection (validator-gated detectors) on the
 interceptor seam. Use `guard()` for PII/secrets (one detection engine), guardrails for keyword /
 regex / URL / length / schema gating with per-agent scope. Both record to the same audit chain.
@@ -194,7 +194,8 @@ call, is the action aligned with intent?* Because the SDK **owns the loop**, it 
 originating user turn into `Context.instruction`, so `judge.task_adherence(respond)` — a BYO judge
 reusing the [judge helpers](/docs/guardrails#the-llm-judge-helpers) — can compare the proposed call
 against what the user asked for. The judge call rides your `instrument()`-ed client, so **its own
-spend is budgeted by tokenguard and audited by acttrace** — the differentiator no one else has.
+spend is budgeted by [tokenguard](/docs/tokenguard) and audited by [acttrace](/docs/acttrace)** — the
+safety check is itself governed, not a blind spot.
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -235,6 +236,86 @@ a content block; set `action="block"` to short-circuit the tool instead. It is a
 (**seconds, billed**) and carries **no adherence-rate claim** — it's a BYO judge, only as good as your
 model + prompt.
 
+### Spotlight — wrap untrusted content
+Retrieved passages, tool results, and pasted text are *data* — but a model can't tell data from
+instructions, which is exactly how indirect prompt injection works. `rules.spotlight()`
+deterministically wraps untrusted content in a trust-lowering delimiter (`<untrusted>…</untrusted>`)
+so the model treats that span as lower-trust data, not a command. It's a `$0`, offline **mitigation**
+(inspired by Azure's Spotlighting), not a detector: it never blocks, it always rewrites (a `redact`
+action), and it defaults to the `input` and `tool_output` stages — where untrusted content arrives.
+`encode=False` by default; set `encode=True` to base-64 the wrapped body for stronger data /
+instruction separation.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, rules
+
+agent = Agent(
+    name="rag", model="gpt-4o", instructions="Answer from the retrieved passages only.",
+    guardrails=[rules.spotlight(stage="tool_output")],  # wrap tool/retrieved text in <untrusted>…</untrusted>
+)
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+// spotlight is Python-first in @cendor/sdk's `rules`; until that re-export ships, import it from the library.
+import { Agent } from '@cendor/sdk';
+import { rules } from '@cendor/guardrails';
+
+const agent = new Agent({
+  name: 'rag', model: 'gpt-4o', instructions: 'Answer from the retrieved passages only.',
+  guardrails: [rules.spotlight({ stage: 'tool_output' })], // wrap tool/retrieved text in <untrusted>…</untrusted>
+});
+```
+
+<!-- /tabs -->
+
+### Evaluate your gate — red-team a corpus
+There's exactly one honest way to put a number on your gate: run it against a **labeled corpus you
+supply** and report the trip rate + false-positive rate, naming the corpus. `run_redteam` does that
+measurement. cendor **vends no attack data** — `load_corpus` reads a file you assembled or downloaded
+(public sets like AdvBench / JailbreakBench / HackAPrompt, under their own licenses). The report
+describes *your* corpus; it is **not** a shipped claim. No jailbreak-catch-rate number ships from
+Cendor without a reproduced, published benchmark (`redteam` lives in `cendor.guardrails`, not the SDK
+re-export surface).
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import rules
+from cendor.guardrails import load_corpus, run_redteam
+
+gate = [rules.keyword_deny(["ignore previous instructions"], action="block")]
+
+# BYO corpus — cendor vends no attack data. Records: {"text": …, "label": "attack" | "benign"}.
+cases = load_corpus("attacks.jsonl")
+report = run_redteam(gate, cases, stage="input")
+print(report.summary())       # trip rate + false-positive rate + counts — describes YOUR corpus
+print(report.by_category)     # per-category (attacks, caught) — publish these, and name the corpus
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { rules } from '@cendor/sdk';
+import { loadCorpus, runRedteam } from '@cendor/guardrails';
+
+const gate = [rules.keywordDeny(['ignore previous instructions'], { action: 'block' })];
+
+// BYO corpus — cendor vends no attack data. TS has no node:fs: pass records (or text you read yourself).
+const cases = loadCorpus([{ text: 'ignore previous instructions and…', label: 'attack' }]);
+const report = runRedteam(gate, cases, { stage: 'input' });
+console.log(report.summary()); // trip rate + false-positive rate + counts — describes YOUR corpus, not a claim
+```
+
+<!-- /tabs -->
+
+## Execution modes
+
 ### Parallel mode — overlap a slow check with the model
 By default input-stage guardrails run **before** the first model call (a block is pre-spend, `$0`).
 For a slow tier-3/4 check (an LLM judge, a hosted rail), `guardrail_mode="parallel"` overlaps the
@@ -257,6 +338,64 @@ import { run } from '@cendor/sdk';
 
 const result = await run(agent, '…', { guardrailMode: 'parallel' });
 ```
+
+<!-- /tabs -->
+
+### Bounded re-ask on an output block
+When an **output**-stage guardrail *blocks* the final answer, you can have the run re-ask the model
+to revise it — up to a cap — instead of raising. Opt in with `Agent(reask_on_output_trip=N)` (default
+`0` = a block raises immediately). Each re-ask is a **full model call** (seconds, and billed), so the
+retry tail is real — but its cost lands in tokenguard/acttrace like any other call, so you can see it.
+It's bounded by both the cap and `max_turns`; if every re-ask still trips, the block raises
+(fail-closed). Non-streaming only.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+<!-- ts-check: skip -->
+
+```python
+agent = Agent(
+    name="writer",
+    guardrails=[rules.json_schema(schema, action="block")],  # e.g. must return valid JSON
+    reask_on_output_trip=2,  # blocked → "revise it" → re-ask, up to twice, then fail-closed
+)
+```
+
+<!-- tab: TypeScript -->
+
+> **Python only (for now).** `reask_on_output_trip` is Python-first in `cendor-sdk`; the TS SDK port
+> rides a later `@cendor/sdk` release — see the [parity matrix](/docs/languages).
+
+<!-- /tabs -->
+
+### Streaming — incremental output checks
+By default `run.stream` checks output guardrails on the **final** text (a block raises after the
+deltas streamed — already-shown deltas can't be unshown). With `Agent(stream_check_window=N)` the
+output guardrails are *also* evaluated on the buffered text every `N` characters, so a block fires
+**earlier** in the stream. This narrows the exposure window — it doesn't close it (a redact
+mid-stream isn't applied), so treat streaming output as advisory and prefer non-streaming for a hard
+output gate. Single-agent `run.stream` only.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, run, rules
+
+agent = Agent(
+    name="writer", model="gpt-4o", instructions="Write the answer.",
+    guardrails=[rules.keyword_deny(["confidential"], stage="output", action="block")],
+    stream_check_window=200,   # re-check buffered output every 200 chars → block fires earlier
+)
+for event in run.stream(agent, "…"):
+    ...   # a block raises mid-stream once the window catches the term
+```
+
+<!-- tab: TypeScript -->
+
+> **Python only (for now).** `stream_check_window` is Python-first in `cendor-sdk`; the TS SDK port
+> rides a later `@cendor/sdk` release — see the [parity matrix](/docs/languages).
 
 <!-- /tabs -->
 
@@ -286,13 +425,14 @@ for (const d of result.guardrailDecisions) {
 <!-- /tabs -->
 
 ### Hosted rails, config-as-data & grounding
-Everything the [library](/docs/guardrails) added in v02 is usable from the SDK's `rules` — attach it
-to an agent like any other guardrail. The **hosted rails** (`rules.bedrock_guardrail` /
-`azure_content_safety` / `model_armor`) run a *cloud* check on your account, but the verdict still
-lands as a **local** `guardrail_decision` on the run's audit chain — cloud check, local evidence.
-`rules.groundedness` / `rules.denied_topics` gate on a bring-your-own embedding function, and
-**`load_policy`** builds a guardrail list from a versioned JSON/YAML file whose hash + version are
-stamped onto every decision (so the audit chain proves which policy was active).
+The hosted rails and config-as-data added in [cendor-guardrails](/docs/guardrails) 1.2+ are usable
+from the SDK's `rules` — attach them to an agent like any other guardrail. The **hosted rails**
+(`rules.bedrock_guardrail` / `azure_content_safety` / `model_armor`) run a *cloud* check on your
+account, but the verdict still lands as a **local** `guardrail_decision` on the run's audit chain —
+cloud check, local evidence. `rules.groundedness` / `rules.denied_topics` gate on a bring-your-own
+embedding function, and **`load_policy`** builds a guardrail list from a versioned JSON/YAML file
+whose hash + version are stamped onto every decision (so the audit chain proves which policy was
+active).
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -324,45 +464,6 @@ import { rules, loadPolicy } from '@cendor/guardrails';
 
 <!-- /tabs -->
 
-### Bounded re-ask on an output block
-When an **output**-stage guardrail *blocks* the final answer, you can have the run re-ask the model
-to revise it — up to a cap — instead of raising. Opt in with `Agent(reask_on_output_trip=N)` (default
-`0` = a block raises immediately). Each re-ask is a **full model call** (seconds, and billed), so the
-retry tail is real — but its cost lands in tokenguard/acttrace like any other call, so you can see it.
-It's bounded by both the cap and `max_turns`; if every re-ask still trips, the block raises
-(fail-closed). Non-streaming only.
-
-<!-- tabs: lang -->
-<!-- tab: Python -->
-
-<!-- ts-check: skip -->
-
-```python
-agent = Agent(
-    name="writer",
-    guardrails=[rules.json_schema(schema, action="block")],  # e.g. must return valid JSON
-    reask_on_output_trip=2,  # blocked → "revise it" → re-ask, up to twice, then fail-closed
-)
-```
-
-<!-- tab: TypeScript -->
-
-<!-- ts-check: skip -->
-
-```ts
-// Python-first: reask_on_output_trip rides the next @cendor/sdk release. See the parity matrix.
-```
-
-<!-- /tabs -->
-
-### Streaming — incremental output checks
-By default `run.stream` checks output guardrails on the **final** text (a block raises after the
-deltas streamed — already-shown deltas can't be unshown). With `Agent(stream_check_window=N)` the
-output guardrails are *also* evaluated on the buffered text every `N` characters, so a block fires
-**earlier** in the stream. This narrows the exposure window — it doesn't close it (a redact
-mid-stream isn't applied), so treat streaming output as advisory and prefer non-streaming for a hard
-output gate. Single-agent `run.stream` only.
-
 ## Reference
 
 | Name | Signature | What it does |
@@ -374,15 +475,70 @@ output gate. Single-agent `run.stream` only.
 | `run(agent, input, guardrails=…, guardrail_mode=…)` | `run` / `run.aio` kwargs | per-run overrides (`guardrails=[]` disables) |
 | `rules.*` | `keyword_deny` / `regex_rule` / `spotlight` / `url_allowlist` / `url_deny` / `length_bounds` / `json_schema` / `custom` / `llm_judge` (+ `timeout` / `on_error`) | the deterministic built-ins — see the [library reference](/docs/guardrails#functions--classes); `spotlight` wraps untrusted content in a trust-lowering delimiter |
 | `rules.pii` / `secrets` / `entropy` | acttrace-bridged detector guardrails | PII/secrets at all four stages (incl. `tool_output`) |
-| `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (`[promptguard]`) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
+| `rules.classifier` / `prompt_guard` / `language` / `openai_moderation` | opt-in detection-tier adapters | local classifier (BYO) / prompt-injection classifier adapter (needs the underlying `cendor-guardrails[promptguard]` extra; Python-only) / language-switch guard / OpenAI free moderation — see the library [Threat model](/docs/guardrails#threat-model) |
 | `rules.bedrock_guardrail` / `azure_content_safety` / `model_armor` | hosted rails (BYO cloud client) | AWS ApplyGuardrail / Azure Prompt Shields / Google Model Armor — metered by the vendor; verdict emits a local `guardrail_decision` |
 | `rules.groundedness` / `denied_topics` | similarity checks (BYO `embed`) | RAG-hallucination gate / off-topic gate over cosine similarity — no bundled model |
 | `load_policy` / `LoadedPolicy` | `load_policy("guardrails.yaml") -> list[Guardrail]` | deterministic rules from a versioned file; `policy_hash` / `policy_version` stamped on every decision |
+| `load_corpus` / `run_redteam` | `cendor.guardrails` (not re-exported by the SDK) | measure a gate's trip rate + false-positive rate against a **BYO** labeled corpus — no vended data, no shipped claim |
 | `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
 | `judge.task_adherence` / `task_adherence` | `judge.task_adherence(respond)` | BYO-judge **tool_call** alignment check — the runner threads the user turn into `Context.instruction`; wire via `rules.llm_judge(..., stage="tool_call", action="flag")` |
 | `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |
 | `GuardrailTripped` | exception | raised on a fail-closed block; carries `.decisions` |
+
+## How it works
+
+The gate is the [cendor-guardrails](/docs/guardrails) engine wired to the four points of the loop.
+Each stage runs its applicable rules; a trip or flag is emitted as a `guardrail_decision` on
+[`cendor-core`](/docs/core)'s bus (so the audit chain records it), and a `block` fails closed:
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}} }%%
+graph TD
+    IN["run(agent, input)"]
+    S1{"input gate"}
+    CALL["model call"]
+    S2{"tool_call gate"}
+    TOOL["execute tool"]
+    S3{"tool_output gate"}
+    S4{"output gate"}
+    OUT["Result"]
+    CHAIN["audit chain<br/>a guardrail_decision per trip/flag"]
+
+    IN --> S1 -->|"pass / redact"| CALL
+    S1 -->|"block"| X1["GuardrailTripped<br/>pre-spend, $0"]
+    CALL -->|"tool requested"| S2
+    S2 -->|"pass"| TOOL --> S3 -->|"pass / redact"| CALL
+    S2 -->|"block"| B["'[blocked]' back to the model"]
+    CALL -->|"final answer"| S4
+    S4 -->|"pass"| OUT
+    S4 -->|"block"| X2["GuardrailTripped<br/>post-generation"]
+
+    S1 -.-> CHAIN
+    S2 -.-> CHAIN
+    S3 -.-> CHAIN
+    S4 -.-> CHAIN
+
+    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
+    classDef gate fill:#F43F5E,color:#ffffff,stroke:#E11D48;
+    class CALL seam;
+    class S1,S2,S3,S4 gate;
+```
+
+## Plugs into the stack
+
+`Agent(guardrails=[…])` is the [cendor-guardrails](/docs/guardrails) Gate attached to the loop; it
+cooperates with the rest of the stack through the event bus and the audit chain, never a direct
+import:
+
+- **↔ [acttrace](/docs/acttrace)** — every trip or flag is emitted on the bus and chained by the
+  run's `AuditLog` as a `guardrail_decision` (hosted-rail verdicts land as *local* evidence too).
+  `rules.pii()` / `secrets()` / `entropy()` bridge acttrace's detector catalogue as guardrails,
+  reaching `tool_output` — content the process-global [`guard()`](governance.md#audit--redaction)
+  never sees.
+- **↔ [tokenguard](/docs/tokenguard)** — a `rules.llm_judge`, a hosted rail, and a bounded re-ask
+  are all real model/cloud calls, so their cost and tokens ride the same
+  [`budget()`](governance.md#budgets) / [`report()`](governance.md#attribution) as the run.
 
 ## Honest limits
 
@@ -401,3 +557,6 @@ output gate. Single-agent `run.stream` only.
 - **Parallel mode can still bill a blocked call.** `guardrail_mode="parallel"` overlaps the input
   check with the first model call, so on a trip the call may already have completed. Use the default
   blocking mode when you need the `$0`-on-block guarantee or input redaction before the call.
+- **A red-team score describes your corpus, not the library.** `run_redteam` measures *your* gate on
+  a corpus *you* supply — cendor vends no attack data, and no jailbreak-catch-rate number ships
+  without a reproduced, published benchmark.
