@@ -67,6 +67,11 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/cendor"]     # contributes cendor/sdk ONLY — NEVER add src/cendor/__init__.py
 
+# Bundle the shared assistant/integration guide (verbatim copy of cendor-libs/INTEGRATION.md; kept
+# at this repo root, which is the package root, so it round-trips through the sdist).
+[tool.hatch.build.targets.wheel.force-include]
+"INTEGRATION.md" = "cendor/sdk/INTEGRATION.md"
+
 # --- Dev-time source override (plan §4) ---------------------------------------------------------
 # Resolve the Cendor libraries from the local monorepo checkout (editable) for fast iteration
 # against a local core without publishing every change. A RELEASED build drops this table and the
