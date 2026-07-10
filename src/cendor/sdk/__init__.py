@@ -65,7 +65,13 @@ from .eval import EvalCase, EvalReport, EvalResult, evaluate
 from .foundry import FoundryAdapter
 from .hitl import require_approval
 from .mcp import get_mcp_prompt, load_mcp_prompts, load_mcp_resources, load_mcp_tools
-from .memory import Session, SQLiteSessionStore, SummarizingSession, llm_summarizer
+from .memory import (
+    Session,
+    SQLiteSessionStore,
+    SqliteSessionStore,
+    SummarizingSession,
+    llm_summarizer,
+)
 from .orchestration import (
     Handoff,
     handoff,
@@ -135,6 +141,7 @@ __all__ = [
     "RetryPolicy",
     "Checkpointer",
     "SQLiteSessionStore",
+    "SqliteSessionStore",  # deprecated casing alias (TS spelling) — canonical is SQLiteSessionStore
     "SummarizingSession",
     "llm_summarizer",
     "evaluate",

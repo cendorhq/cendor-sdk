@@ -35,7 +35,9 @@ def register_model_price(
 
     Rates are given per 1M tokens by default (``per="1M"``; also ``"1K"`` or ``"token"``) and stored
     as exact per-token ``Decimal``. After registering, ``result.cost`` is non-zero for the model and
-    USD ``budget(...)`` caps enforce against it.
+    USD ``budget(...)`` caps enforce against it. This SDK helper is the supported entry point for
+    Python — there is **no** ``cendor.core.prices.register`` to call directly; it writes straight
+    into ``cendor-core``'s in-memory price table.
 
     ```python
     from cendor.sdk import Agent, run, budget

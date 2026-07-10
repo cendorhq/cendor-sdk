@@ -20,6 +20,13 @@ class Session:
     Pass the same ``Session`` to successive ``run()`` calls and the agent remembers the prior turns
     (within the process). The stored messages are canonical (OpenAI-shape). ``save``/``load`` give
     resumable, local-first persistence (no server); ``SQLiteSessionStore`` is the durable variant.
+
+    ```python
+    from cendor.sdk import Agent, Session, run
+    mem = Session()
+    run(agent, "My name is Ada.", session=mem)
+    run(agent, "What's my name?", session=mem)   # remembers "Ada"
+    ```
     """
 
     messages: list[dict] = field(default_factory=list)
@@ -101,6 +108,11 @@ def llm_summarizer(
     The summarization is itself a governed ``run`` (its ``LLMCall`` rides the bus — cost/audit
     apply). Use a cheap model here (e.g. ``gpt-4o-mini``). Synchronous; for ``run.aio`` this runs
     between turns, so keep it fast or pass your own async-friendly summarizer.
+
+    ```python
+    from cendor.sdk import SummarizingSession, llm_summarizer
+    mem = SummarizingSession(summarizer=llm_summarizer("gpt-4o-mini"), max_messages=20)
+    ```
     """
 
     def summarize(old: list[dict], prior: str | None) -> str:
@@ -201,6 +213,10 @@ class SQLiteSessionStore:
     run(agent, "hi", session=session)
     store.save("user-42", session)           # durable across restarts
     ```
+
+    The canonical Python spelling is ``SQLiteSessionStore``. The TypeScript port names it
+    ``SqliteSessionStore`` (lowercase ``qlite``); that spelling is also accepted here as a
+    deprecated alias, so the wrong casing resolves-and-teaches instead of raising ``ImportError``.
     """
 
     def __init__(self, path: str) -> None:
@@ -236,3 +252,7 @@ class SQLiteSessionStore:
     def close(self) -> None:
         """Close the underlying connection."""
         self._conn.close()
+
+
+# deprecated casing alias — canonical is SQLiteSessionStore (TS uses SqliteSessionStore)
+SqliteSessionStore = SQLiteSessionStore

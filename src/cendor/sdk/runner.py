@@ -1060,7 +1060,20 @@ class _Run:
         guardrails: list | None = None,
         guardrail_mode: str | None = None,
     ) -> Result:
-        """``on_step`` (if set) is called with each :class:`~cendor.sdk.result.Step` live as the
+        """Run ``agent`` on ``input`` and return a :class:`Result` (sync).
+
+        ```python
+        from cendor.sdk import Agent, run
+        agent = Agent(name="assistant", model="gpt-4o")
+        result = run(agent, "Summarize the meeting notes.")
+        print(result.output)
+        ```
+
+        Async is ``await run.aio(agent, input)`` (same signature). Streaming is ``run.stream(...)``
+        (sync generator) and ``run.astream(...)`` (async iterator) — the async-stream method is
+        ``run.astream``, **not** ``run.stream.aio``.
+
+        ``on_step`` (if set) is called with each :class:`~cendor.sdk.result.Step` live as the
         run progresses — a public progress hook, complementing the post-hoc ``Result.steps``.
         ``guardrails`` overrides the agent's own list for this run (for a team, it replaces every
         segment's list); omit it to use each agent's ``Agent(guardrails=[…])``. ``guardrail_mode``

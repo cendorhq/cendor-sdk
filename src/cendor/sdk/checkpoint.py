@@ -13,7 +13,19 @@ from typing import Any
 
 
 class Checkpointer:
-    """Persist and restore run state to a local JSON file."""
+    """Persist and restore run state to a local JSON file.
+
+    Pass a path (or a ``Checkpointer``) as ``run(..., checkpoint=…)`` to make a run resumable: the
+    conversation is saved after every turn, so re-running the same call after a crash picks up where
+    it left off and already-run tools are not re-executed. A finished run returns its stored
+    ``Result`` without touching the model.
+
+    ```python
+    from cendor.sdk import Agent, run
+    agent = Agent(name="researcher", model="gpt-4o")
+    result = run(agent, "Draft the Q3 report.", checkpoint="run.db")  # resumes on re-run
+    ```
+    """
 
     def __init__(self, path: str) -> None:
         self.path = Path(path)

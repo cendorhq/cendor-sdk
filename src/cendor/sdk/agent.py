@@ -18,6 +18,24 @@ from .tools import Tool, as_tool
 class Agent:
     """A provider-agnostic agent.
 
+    ```python
+    from cendor.sdk import Agent, run, rules
+
+    agent = Agent(
+        name="support",
+        model="gpt-4o",
+        guardrails=[rules.keyword_deny(["ignore previous"], action="block")],
+        max_usd=0.50,
+    )
+    result = run(agent, "Why was I charged twice?")
+    ```
+
+    There is **no** ``budget=`` field: the per-agent spend cap is ``max_usd`` (a pre-flight block
+    enforced by the orchestrator). For a process-wide budget spanning many agents/runs, wrap the
+    run in ``cendor.tokenguard.budget()`` (re-exported as ``cendor.sdk.budget``) instead. The
+    ``guardrails`` list gates all four stages (``input`` / ``tool_call`` / ``tool_output`` /
+    ``output``).
+
     Args:
         name: A short identifier used in results, audit decisions, and handoffs.
         model: Any core-supported model id (``"gpt-4o"``, ``"claude-opus-4-8"``, ``"gemini-…"``).
