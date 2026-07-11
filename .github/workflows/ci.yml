@@ -9,6 +9,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The default GITHUB_TOKEN needs only checkout — least privilege for a public repo.
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
