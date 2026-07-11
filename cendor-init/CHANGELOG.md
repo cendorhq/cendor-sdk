@@ -1,5 +1,15 @@
 # cendor-init changelog
 
+## 0.2.1 — 2026-07-11
+
+- `doctor` warns when the installed `cendor-core`'s bundled price snapshot is more than 30 days old
+  (models released since then estimate at $0 until `prices.refresh()` or an upgrade — an offline
+  hint, never an error).
+- `__version__` is now derived from the installed distribution metadata (`importlib.metadata`), so
+  it can no longer drift from the published version (0.2.0 shipped reporting 0.1.1).
+- Offline versions snapshot refreshed to the 2026-07-11 patch shelf (core 1.5.2 / 0.5.2,
+  mcp 0.1.3, init 0.2.1).
+
 ## 0.2.0 — 2026-07-11
 
 - `init --scaffold` is now **SDK-aware**: when the project declares/installs `cendor-sdk` (or
