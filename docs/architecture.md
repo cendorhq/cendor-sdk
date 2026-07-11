@@ -20,27 +20,27 @@ stand on.
 <div class="mm-phase">
 <div class="mm-plabel">before the call · pre-flight</div>
 <div class="mm-row">
-<div class="mm-lib"><span class="mm-n" style="color:#3B82F6">contextkit</span><span class="mm-sl">assemble</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#22C55E">squeeze</span><span class="mm-sl">compress</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#8B5CF6">tokenguard</span><span class="mm-sl">budget</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#F97316">guardrails</span><span class="mm-sl">input gate</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#F43F5E">acttrace</span><span class="mm-sl">redact</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--ck-text)">contextkit</span><span class="mm-sl">assemble</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--sq-text)">squeeze</span><span class="mm-sl">compress</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--tg-text)">tokenguard</span><span class="mm-sl">budget</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--gr-text)">guardrails</span><span class="mm-sl">input gate</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--at-text)">acttrace</span><span class="mm-sl">redact</span></div>
 </div>
 </div>
 <div class="mm-arrow" aria-hidden="true">→</div>
 <div class="mm-phase mm-call">
 <div class="mm-plabel">the call</div>
 <div class="mm-row">
-<div class="mm-lib"><span class="mm-n" style="color:#94A3BB">core</span><span class="mm-sl">instrument()</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--co-text)">core</span><span class="mm-sl">instrument()</span></div>
 </div>
 </div>
 <div class="mm-arrow" aria-hidden="true">→</div>
 <div class="mm-phase">
 <div class="mm-plabel">after · automatic, via the bus</div>
 <div class="mm-row">
-<div class="mm-lib"><span class="mm-n" style="color:#F97316">guardrails</span><span class="mm-sl">tool + output gate</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#14B8A6">cassette</span><span class="mm-sl">record</span></div>
-<div class="mm-lib"><span class="mm-n" style="color:#F43F5E">acttrace</span><span class="mm-sl">audit</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--gr-text)">guardrails</span><span class="mm-sl">tool + output gate</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--cs-text)">cassette</span><span class="mm-sl">record</span></div>
+<div class="mm-lib"><span class="mm-n" style="color:var(--at-text)">acttrace</span><span class="mm-sl">audit</span></div>
 </div>
 </div>
 </div>
