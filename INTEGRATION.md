@@ -29,6 +29,35 @@ shrink a payload · `guardrails` block/redact unsafe input+output · `cassette` 
 offline · `acttrace` PII/secret detection + tamper-evident audit · `core` token count / price /
 `instrument()`. A whole governed agent loop → `cendor-sdk` / `@cendor/sdk`.
 
+## Building an agent? (`cendor-sdk` / `@cendor/sdk`)
+
+The second door: the SDK gives you the whole governed agent loop — `Agent`, `tool`, `run` — with the
+same governance one import away.
+
+```python
+# Python  (cendor.sdk)
+from cendor.sdk import Agent, run, budget
+
+agent = Agent(name="assistant", model="gpt-4o", instructions="Be helpful.", max_usd=0.5)
+with budget(usd=0.10, on_exceed="block"):        # pre-flight cap
+    result = run(agent, "Summarize the standup.")
+print(result.output, result.cost)                # the answer + Decimal money
+```
+
+```ts
+// TypeScript  (@cendor/sdk)
+import { Agent, run, withBudget } from '@cendor/sdk';
+
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', instructions: 'Be helpful.', maxUsd: 0.5 });
+const result = await withBudget({ usd: 0.10, onExceed: 'block' }, () =>   // pre-flight cap
+  run(agent, 'Summarize the standup.'));
+console.log(result.output, result.cost?.toString());  // the answer + decimal money
+```
+
+The per-agent cost cap is **`max_usd`/`maxUsd`**, not a `budget=` field; the SQLite session store
+casing differs (`SQLiteSessionStore` in Python, `SqliteSessionStore` in TS); `cassette` is imported
+from the umbrella (`from cendor import cassette`), not the SDK. Full guide: <https://cendor.ai/docs/sdk>.
+
 ## The three traps most likely to bite
 
 1. **TS `budget` is curried:** `budget(cfg)(fn)` — never `budget(cfg, fn)`. Python `budget(...)` is a

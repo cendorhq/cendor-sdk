@@ -297,13 +297,32 @@ const result = await run(agent, 'Give me one tip for faster cold starts.');
 Already running the service yourself? Just pass `base_url=` (or `FOUNDRY_LOCAL_ENDPOINT`) and
 skip the manager.
 
+## Provider-author reference
+
+Writing a custom provider adapter (or reading a normalized reply directly)? The parse layer emits
+two canonical shapes, and TypeScript exposes the provider seam helpers:
+
+| Symbol | What it is |
+|---|---|
+| `ParsedResponse` | the normalized model reply — `content`, `tool_calls` (a list of `ToolInvocation`), `finish_reason`, `raw` |
+| `ToolInvocation` | one model→SDK tool request — `id`, `name`, `arguments` (a dict) |
+| `resolveProvider` / `inferProvider` / `getProvider` *(TS)* | resolve or infer the provider for a model id, or fetch a registered provider |
+| `assistantMessage` / `toolResultMessage` *(TS)* | build canonical assistant / tool-result messages |
+| `Provider` *(TS type)* | the seam interface a new provider adapter implements |
+
+`ParsedResponse` and `ToolInvocation` are `cendor.sdk` exports in Python and type exports in
+TypeScript; the seam helpers are TypeScript-only (Python provider adapters subclass the provider base
+in `cendor.sdk.providers`). This is deep surface — most apps never touch it; the loop normalizes for
+you.
+
 ## Plugs into the stack
 
-Every provider path terminates in an instrumented client, so
-[budgets, audit, redaction](governance.md) and [cassette record/replay](governance.md#testing--record-once-replay-forever)
-apply identically across all ten. Provider-level details that aren't SDK-specific — token
-counting, price sources, OTel ingestion — live in the library docs:
-[Providers & Integration](/docs/providers).
+Every provider path terminates in a client wrapped by [`cendor-core`](/docs/core)'s `instrument()`
+seam, so [budgets, audit, redaction](governance.md) and
+[cassette record/replay](governance.md#testing--record-once-replay-forever)
+apply identically across all ten — the provider detection, token counting, and pricing are all
+core's. Provider-level details that aren't SDK-specific — token counting, price sources, OTel
+ingestion — live in the library docs: [Providers & Integration](/docs/providers).
 
 ## Honest limits
 

@@ -72,9 +72,12 @@ bills.
 ### Always-on RAG — `Agent(retriever=...)`
 
 A `retriever` is any `query -> list[str]` callable. Before each model call, retrieved passages
-are injected as a system message. `VectorIndex` is a dependency-free in-memory cosine index built
-on the governed `embed()` — right for small corpora, demos, and tests. For scale, wrap your own
-store:
+are injected as a system message — and when `Agent(context_budget=…)` is set, they're packed into
+the window by [contextkit](/docs/contextkit) alongside the conversation, with
+[squeeze](/docs/squeeze) compressing oversized passages when it's installed. So retrieval feeds the
+same assembly layer the mapping tables point RAG at. `VectorIndex` is a dependency-free in-memory
+cosine index built on the governed `embed()` — right for small corpora, demos, and tests. For
+scale, wrap your own store:
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -145,11 +148,43 @@ Long-term memory across sessions is retrieval wearing a different hat: store fac
 attach it as the `retriever`, and past knowledge comes back by relevance. See
 [Memory & sessions](memory.md#long-term--semantic-memory).
 
+## How it works
+
+Retrieval is a seam, not a database — one governed embed call, then assembly into the window before
+the model ever runs:
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}} }%%
+graph TD
+    Q["run(agent, query)"]
+    RET["retrieve passages<br/>(VectorIndex or your store)"]
+    EMB["embed(query)<br/>governed LLMCall on the bus (core)"]
+    ASM["assemble the window<br/>(contextkit; squeeze compresses oversized passages)"]
+    BUD["pre-flight budget<br/>(tokenguard)"]
+    CALL["the model call<br/>core.instrument() → the bus"]
+    OUT["Result + audit chain"]
+
+    Q --> RET --> EMB --> ASM --> BUD --> CALL --> OUT
+
+    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
+    class CALL seam;
+```
+
 ## Plugs into the stack
 
-Embeddings ride [`cendor-core`](/docs/core)'s bus, so `budget` caps an index build, `track`
-attributes it, `AuditLog` records it, and [cassette](governance.md#testing--record-once-replay-forever)
-replays a whole RAG trajectory — retrieval included — offline in CI.
+Retrieved passages become part of the prompt, so retrieval sits *inside* the governed loop, not
+beside it:
+
+- **↔ [contextkit](/docs/contextkit)** (+ [squeeze](/docs/squeeze)) — with `context_budget` set,
+  passages are assembled into the token window alongside the conversation, oversized ones compressed
+  reversibly. This is the assembly layer the [feature map](getting-started.md#5-where-each-concept-lives)
+  routes RAG to.
+- **↔ [cendor-core](/docs/core)** — every `embed()` is a governed `LLMCall` on the bus, correlated
+  by `trace`, so an index build isn't an invisible bill.
+- **↔ [tokenguard](/docs/tokenguard)** — `budget` caps an index build and `track` attributes it,
+  the same as any other spend.
+- **↔ [acttrace](/docs/acttrace) / [cassette](/docs/cassette)** — `AuditLog` records the retrieval,
+  and cassette replays a whole RAG trajectory — retrieval included — offline in CI.
 
 ## Honest limits
 

@@ -121,6 +121,30 @@ The checkpoint is a local JSON file written atomically (temp + replace). A finis
 run that ended without a final answer reports it via
 [`Result.incomplete`](agents.md#result--the-receipt).
 
+`checkpoint=` accepts a path (auto-wrapped) or a `Checkpointer` instance — pass the class directly
+when you want the handle (to inspect `resumable_messages()` or `clear()` it):
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, run, Checkpointer
+
+ckpt = Checkpointer("run.ckpt.json")
+run(agent, "a long task", checkpoint=ckpt)   # same behaviour as passing the path
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, run, Checkpointer } from '@cendor/sdk';
+
+const ckpt = new Checkpointer('run.ckpt.json');
+await run(agent, 'a long task', { checkpoint: ckpt });   // same behaviour as passing the path
+```
+
+<!-- /tabs -->
+
 ### Durable memory
 
 `Session` gives in-memory conversation state with local JSON `save`/`load`; for durable,
@@ -151,6 +175,36 @@ store.save('user-42', session);          // durable across restarts
 ```
 
 <!-- /tabs -->
+
+## How it works
+
+Two independent safety nets on one turn: a `RetryPolicy` retries the *transient* call failures,
+and a checkpoint persists after every *completed* turn so a crash resumes instead of restarting:
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}} }%%
+graph TD
+    RUN["run(agent, input, retry=…, checkpoint=…)"]
+    CALL["the model call<br/>core.instrument() → the bus"]
+    RETRY{"transient<br/>failure?"}
+    BACK["back off + retry<br/>(RetryPolicy; governance errors never retried)"]
+    TURN["turn completes"]
+    CKPT["persist checkpoint<br/>(atomic local JSON, after each turn)"]
+    MORE{"more turns?"}
+    CRASH["process crash → re-run same checkpoint"]
+    RESUME["resume from saved messages<br/>(completed tools not re-executed)"]
+    DONE["Result — checkpoint marked done"]
+
+    RUN --> CALL --> RETRY
+    RETRY -->|yes| BACK --> CALL
+    RETRY -->|no| TURN --> CKPT --> MORE
+    MORE -->|yes| CALL
+    MORE -->|"no"| DONE
+    CKPT -.-> CRASH -.-> RESUME --> CALL
+
+    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
+    class CALL seam;
+```
 
 ## Plugs into the stack
 

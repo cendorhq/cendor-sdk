@@ -6,6 +6,47 @@ span tree, and wire **human-in-the-loop** approvals into the audit chain. Everyt
 optional and local-first — protocol SDKs are extras, and the telemetry is a no-op unless
 OpenTelemetry is installed and configured.
 
+## Quickstart
+
+The most common interop path — turn an MCP server's tools into governed `Tool`s and run an agent
+on them. Every MCP call then rides [`cendor-core`](/docs/core)'s bus, so it's budgeted, gated, and
+audited like any other call:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, run, load_mcp_tools
+
+# `session` is your connected MCP client session (transport setup is in the MCP section below).
+tools = await load_mcp_tools(session)      # each MCP tool → a governed Tool
+agent = Agent(name="assistant", model="gpt-4o", tools=tools, instructions="Use the tools.")
+result = await run.aio(agent, "…")         # MCP calls ride the bus: budgeted, gated, audited
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, run, loadMcpTools } from '@cendor/sdk';
+
+const tools = await loadMcpTools(session);   // each MCP tool → a governed Tool
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', tools, instructions: 'Use the tools.' });
+const result = await run(agent, '…');        // MCP calls ride the bus: budgeted, gated, audited
+```
+
+<!-- /tabs -->
+
+## Core concepts
+
+**The governed envelope rides along.** The one idea under every integration on this page: when a
+governed run crosses a protocol boundary, its governance metadata travels with it. An A2A reply
+carries the run's `trace_id` and `cost_usd`; a Foundry Activity puts the same envelope in
+`channelData.cendor`; an OpenTelemetry span tree carries `gen_ai.usage.cost`; a human approval lands
+as a `human_oversight` entry on the audit chain. So a *consumer* of your agent — another agent, a
+Copilot channel, an observability backend — sees governed metadata, not just text. That envelope is
+assembled by the libraries: cost by [tokenguard](/docs/tokenguard), the `trace_id` correlation and
+audit entries by [acttrace](/docs/acttrace), all on [`cendor-core`](/docs/core)'s bus.
+
 ## MCP — consume Model Context Protocol tools
 
 `load_mcp_tools(session)` turns an MCP server's tools into governed `Tool`s (the schema comes
@@ -215,6 +256,44 @@ await run(agent, 'Refund order 42 for $50', { audit });
 
 In production the `approver` is where you block on a reviewer — a prompt, a queue, a webhook —
 then return the decision to resume (or deny) the run.
+
+## How it works
+
+One governed `run()` produces one `Result`; each interop surface *projects* that result outward,
+carrying the same governance envelope (`trace_id` + `cost_usd`) across the protocol boundary:
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false}} }%%
+graph TD
+    RUN["run(agent, input)<br/>core.instrument() → the bus"]
+    RES["Result<br/>trace_id · cost_usd · agents"]
+    MCP["MCP tools in<br/>(each call on the bus)"]
+    A2A["A2A reply<br/>metadata: { trace_id, cost_usd }"]
+    FDY["Foundry Activity<br/>channelData.cendor"]
+    OTEL["OTel gen_ai.* spans<br/>gen_ai.usage.cost"]
+    HITL["human approval<br/>human_oversight on the audit chain"]
+
+    MCP --> RUN --> RES
+    RES --> A2A
+    RES --> FDY
+    RES --> OTEL
+    RES --> HITL
+
+    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
+    class RUN seam;
+```
+
+## Plugs into the stack
+
+Interop surfaces don't add governance — they *carry* the governance the run already produced,
+through the same libraries, never a direct import:
+
+- **↔ [tokenguard](/docs/tokenguard)** — the `cost_usd` on an A2A reply / Foundry Activity and the
+  `gen_ai.usage.cost` on a span are the run's priced spend.
+- **↔ [acttrace](/docs/acttrace)** — the `trace_id` correlates every projected surface to the run,
+  and a `require_approval` decision is a `human_oversight` entry on the tamper-evident chain.
+- **↔ [cendor-core](/docs/core)** — MCP tool calls ride the `instrument()` seam and the bus like any
+  other call, and `span_tree` reads the bus's normalized events to emit the OTel tree.
 
 ## Honest limits
 

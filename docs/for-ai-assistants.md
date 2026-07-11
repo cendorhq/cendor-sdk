@@ -35,6 +35,28 @@ For the SDK-specific surfaces, the docs themselves are the reference:
 [Agents & the loop](agents.md), [Governance](governance.md), [Guardrails](guardrails.md), and the
 [FAQ](faq.md).
 
+## SDK-specific traps
+
+The canonical trap table above covers the shared library primitives. These are the traps that bite
+**only when you use the SDK door** — where the SDK re-exports something (or deliberately doesn't), or
+where a language ships the SDK feature and the other lags. Same four-column shape for muscle memory.
+Every row is verified against the current source in both languages.
+
+| Task | Python (`cendor.sdk`) | TypeScript (`@cendor/sdk`) | The trap |
+|---|---|---|---|
+| A governed agent | `Agent(name=…, model=…, guardrails=[…], max_usd=0.5)`; `run(agent, "hi")` | `new Agent({ name, model, guardrails: [...], maxUsd: 0.5 })`; `run(agent, 'hi')` | No `budget=` on `Agent` — the per-agent cap is `max_usd`/`maxUsd`. TS is `maxUsd` and `baseURL` (capital URL); process-wide caps use tokenguard's `budget()`. |
+| Session store | `SQLiteSessionStore(path)` — capital `SQLite` | `new SqliteSessionStore(path)` — `Sqlite` | Casing differs across languages, and it lives in `cendor.sdk`, not `cassette`. TS also has `new MemorySessionStore()` (no-arg, in-memory, TS-only); Python uses a plain `Session`. |
+| Record / replay | `from cendor import cassette` | `import { using } from '@cendor/cassette'` | **cassette is NOT re-exported by the SDK** — import it from the umbrella, never `cendor.sdk.cassette`. It surfaces in the SDK only via the eval harness. |
+| PII / secrets in the loop | `rules.pii()` / `rules.secrets()` / `rules.entropy()` | `rules.pii(undefined, {…})` / `rules.secrets({…})` | These are **acttrace detectors bridged** into the Gate — they gate **all four stages incl. `tool_output`**, which the process-global `guard()` never sees. Not `cendor.guardrails` rules. |
+| LLM-judge intent / adherence | `from cendor.sdk import judge, rules`; `judge.task_adherence(respond)` / `judge.intent_prompt(i, mode="deny")` | `judge.taskAdherence(respond)` / `judge.intentPrompt(i, 'deny')` | `judge.*` build a check (a policy string or a verdict fn), **not** a guardrail — wire via `rules.llm_judge(check, stage=…)`. |
+| Spotlight (wrap untrusted) | `rules.spotlight(...)` — on the SDK `rules` | `import { rules } from '@cendor/guardrails'` | In **TS, `spotlight` and the detection-tier adapters are NOT on `@cendor/sdk`** — import them from `@cendor/guardrails`. Python's SDK `rules` re-exports `spotlight`. |
+| Red-team a gate | `from cendor.guardrails import load_corpus, run_redteam` | `import { loadCorpus, runRedteam } from '@cendor/guardrails'` | `redteam` / `load_corpus` live in `cendor.guardrails`, deliberately **not** SDK re-exports — cendor vends no attack data. |
+| Python-only SDK gates | `Agent(reask_on_output_trip=2, stream_check_window=200)` | *Python-first — the TS port lands later* | Bounded re-ask on an output block + streaming output-window checks are Python-first in `cendor-sdk`; see the [parity matrix](/docs/languages). |
+| HF / Azure model ids | `Agent(model="…", provider="huggingface")` | `new Agent({ model, provider: 'huggingface' })` | Hub ids & Azure deployment names aren't prefix-inferable — always pass `provider=`. Provider SDKs are extras (Py) / peers (TS). |
+
+These SDK rows are also folded into the machine-served canonical table, so an agent-mode assistant on
+the [MCP server](/docs/assistant-mcp) gets them from `get_api` too.
+
 ## Honest limits
 
 - These aids teach call **shapes**, never performance numbers — every benchmark-backed claim lives in

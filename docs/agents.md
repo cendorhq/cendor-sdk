@@ -62,6 +62,7 @@ Agent(
     context_budget: int | None = None,  # assemble history to a token budget via contextkit
     temperature: float | None = None,
     max_tokens: int | None = None,
+    extra: dict = {},              # raw provider request kwargs (tool_choice, reasoning_effort, …) — see Providers
 )
 ```
 
@@ -81,6 +82,7 @@ new Agent({
   contextBudget?: number,        // assemble history to a token budget via contextkit
   temperature?: number,
   maxTokens?: number,
+  extra?: Record<string, unknown>, // raw provider request kwargs (tool_choice, reasoningEffort, …) — see Providers
 })
 ```
 
@@ -250,17 +252,18 @@ const result = await run(agent, 'Weather in Paris?');
 
 ### Streaming
 
-`run.stream` (sync) / `run.astream` (async) yield events as the run progresses; the terminal
-`RunComplete` event carries the same `Result` a blocking `run()` returns. Token-by-token
-reassembly is native for the OpenAI family + Ollama (tool-call deltas included); other providers
-fall back to a whole-response delta. Multi-agent handoff runs stream too
-([Multi-agent](multi-agent.md)).
+`run.stream` (sync) / `run.astream` (async) yield events as the run progresses. The events are the
+**`StreamEvent` union** — `TextDelta` (a text chunk), `ToolCallEvent` (a tool is about to run),
+`ToolResultEvent` (a tool returned its result), and the terminal `RunComplete` (which carries the
+same `Result` a blocking `run()` returns). Token-by-token reassembly is native for the OpenAI family
++ Ollama (tool-call deltas included); other providers fall back to a whole-response delta.
+Multi-agent handoff runs stream too ([Multi-agent](multi-agent.md)).
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
 
 ```python
-from cendor.sdk import Agent, run, TextDelta, ToolCallEvent, RunComplete
+from cendor.sdk import Agent, run, TextDelta, ToolCallEvent, ToolResultEvent, RunComplete
 
 agent = Agent(name="a", model="gpt-4o", instructions="Be brief.")
 for event in run.stream(agent, "Tell me a joke"):
@@ -268,6 +271,8 @@ for event in run.stream(agent, "Tell me a joke"):
         print(event.text, end="", flush=True)
     elif isinstance(event, ToolCallEvent):
         print(f"\n[calling {event.name}({event.arguments})]")
+    elif isinstance(event, ToolResultEvent):
+        print(f"\n[{event.name} → {event.result}]")
     elif isinstance(event, RunComplete):
         print("\ncost:", event.result.cost)
 ```
@@ -275,12 +280,13 @@ for event in run.stream(agent, "Tell me a joke"):
 <!-- tab: TypeScript -->
 
 ```ts
-import { Agent, run, TextDelta, ToolCallEvent, RunComplete } from '@cendor/sdk';
+import { Agent, run, TextDelta, ToolCallEvent, ToolResultEvent, RunComplete } from '@cendor/sdk';
 
 const agent = new Agent({ name: 'a', model: 'gpt-4o', instructions: 'Be brief.' });
 for await (const event of run.stream(agent, 'Tell me a joke')) {
   if (event instanceof TextDelta) process.stdout.write(event.text);
   else if (event instanceof ToolCallEvent) console.log(`\n[calling ${event.name}]`);
+  else if (event instanceof ToolResultEvent) console.log(`\n[${event.name} → ${event.result}]`);
   else if (event instanceof RunComplete) console.log('\ncost:', event.result.cost?.toString());
 }
 ```
@@ -352,6 +358,36 @@ wrappers pull in [`tokenguard`](/docs/tokenguard) and [`acttrace`](/docs/acttrac
 [`Agent(guardrails=[…])`](guardrails.md) attaches the [`cendor-guardrails`](/docs/guardrails)
 four-stage gate, and [`cassette`](/docs/cassette) records/replays the whole trajectory. All through
 [`cendor-core`](/docs/core)'s seams — the SDK contains no governance logic of its own.
+
+## Reference
+
+A few names that round out the surface:
+
+| Name | What it is |
+|---|---|
+| `Run` | an alias of `Result` (`Run is Result` / `Run === Result`) — same class, either name |
+| `Agent(extra=…)` / `extra` | raw provider request-kwargs merged into every call (`tool_choice`, `reasoning_effort`, `top_p`, `seed`, …) — [Providers → `Agent.extra`](providers.md#provider-params--reasoning--agentextra) |
+| `StreamEvent` | the streaming union: `TextDelta` \| `ToolCallEvent` \| `ToolResultEvent` \| `RunComplete` |
+| `ParsedResponse` / `ToolInvocation` | the provider-parse shapes — [Providers → provider-author reference](providers.md#provider-author-reference) |
+
+### TypeScript-only / low-level exports
+
+`@cendor/sdk` also exports a low-level tail. A few are genuinely useful; the rest are provider-author
+or internal surface, declared here so it's documented, not hidden. (These are TypeScript exports;
+Python's equivalents differ — e.g. Python has no in-memory session *store*, just `Session`.)
+
+| Export | What it is |
+|---|---|
+| `MemorySessionStore` | an in-memory keyed session store (TS-only; Python uses a plain `Session`) — [Memory](memory.md#durable-multi-conversation-memory--sqlitesessionstore) |
+| `asTool(fn \| tool)` | coerce a bare function **or** an existing `Tool` into a `Tool` (idempotent — it's what `Agent` does to its `tools` array). It does **not** wrap an `Agent`; to build a tool from a function use `tool(...)` |
+| `runAgents` / `runAgentsAsync` / `streamAgents` | the low-level array forms of a handoff team — [Multi-agent](multi-agent.md#sequential--parallel-pipelines) |
+| `Money` / `sumMoney` | decimal-money value + summation (re-exported from `@cendor/core`) |
+| `Verdict` / `GuardrailDecision` | a guardrail check's result + the bus evidence event |
+| `formatContext` | join retrieved chunks into a single context string |
+| `callWithRetry` | run a function under a `RetryPolicy` directly (what `run(retry=…)` uses) |
+| `alwaysApprove` / `alwaysReject` | ready-made test approvers for `requireApproval` |
+| `asCheckpointer` | coerce a path or `Checkpointer` into a `Checkpointer` |
+| `resolveProvider` / `inferProvider` / `getProvider` / `assistantMessage` / `toolResultMessage` / `Provider` | provider-author surface for building a custom provider adapter |
 
 ## Honest limits
 

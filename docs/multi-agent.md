@@ -144,6 +144,12 @@ result = await parallelAsync([a, b, c], 'Same task, three takes');
 
 <!-- /tabs -->
 
+> **TypeScript low-level forms.** `run([entry, peer], …)` and `run.stream([…])` dispatch to the
+> explicit array entry points `runAgents` / `streamAgents` (`runAgentsAsync` is an alias of
+> `runAgents`) — call them directly if you'd rather skip the `run` dispatch. Same
+> `(agents, input, opts)` shape. `sequential` / `parallel` / `parallelAsync` above are the pipeline
+> forms; `runAgents` is the handoff-team runner.
+
 ### Per-agent budgets & attribution
 
 <!-- tabs: lang -->

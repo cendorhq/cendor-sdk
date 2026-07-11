@@ -234,6 +234,46 @@ a content block; set `action="block"` to short-circuit the tool instead. It is a
 (**seconds, billed**) and carries **no adherence-rate claim** — it's a BYO judge, only as good as your
 model + prompt.
 
+### Intent as an LLM judge — `judge.intent_prompt`
+
+`rules.intent` screens intent with **embeddings or a classifier** — fast, local, threshold-based.
+When you'd rather a *model* decide the nuance a similarity score misses, `judge.intent_prompt(intents,
+mode="deny"|"allow")` builds the judge policy string, `judge.judge(respond, policy)` turns your
+instrumented model call into the verdict check, and `rules.llm_judge(...)` wires it as an input-stage
+guardrail. It's the LLM-judge backend that complements `rules.intent`'s embed/classify form — and like
+every judge, the check call itself is budgeted and audited.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent, judge, rules
+
+policy = judge.intent_prompt({"support": ["reset my password"]}, mode="allow")  # off-topic → trip
+check  = judge.judge(respond, policy)          # respond = your instrumented model call
+rail   = rules.llm_judge(check, stage="input", action="flag", name="intent_judge")
+
+agent = Agent(name="support", model="gpt-4o", instructions="Answer support only.", guardrails=[rail])
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, judge, rules } from '@cendor/sdk';
+
+const policy = judge.intentPrompt({ support: ['reset my password'] }, 'allow');  // off-topic → trip
+const check  = judge.judge(respond, policy);   // respond = your instrumented model call
+const rail   = rules.llmJudge(check, { stage: 'input', action: 'flag' });
+
+const agent = new Agent({ name: 'support', model: 'gpt-4o', guardrails: [rail] });
+```
+
+<!-- /tabs -->
+
+`mode` is `"deny"` (block the listed intents) or `"allow"` (block anything *off* the list). It returns
+a policy string, not a guardrail — feed it through `judge.judge` → `rules.llm_judge`. No accuracy
+claim: it's your model judging your policy.
+
 ### Spotlight — wrap untrusted content
 Retrieved passages, tool results, and pasted text are *data* — but a model can't tell data from
 instructions, which is exactly how indirect prompt injection works. `rules.spotlight()`
@@ -531,10 +571,78 @@ const cat = rules.customCategory('code_requests', ['write a program'], embed, { 
 | `load_policy` / `LoadedPolicy` | `load_policy("guardrails.yaml") -> list[Guardrail]` | deterministic rules from a versioned file; `policy_hash` / `policy_version` stamped on every decision |
 | `load_corpus` / `run_redteam` | `cendor.guardrails` (not re-exported by the SDK) | measure a gate's trip rate + false-positive rate against a **BYO** labeled corpus — no vended data, no shipped claim |
 | `judge` | `judge.judge(respond, policy)` | helpers to build an `llm_judge` check (verdict prompt + strict-JSON parse) |
+| `judge.intent_prompt` / `intentPrompt` | `judge.intent_prompt(intents, mode="deny"\|"allow")` | build an LLM-judge intent policy string → `judge.judge` → `rules.llm_judge` (input-stage); the model-judged counterpart to `rules.intent`'s embed/classify form |
 | `judge.task_adherence` / `task_adherence` | `judge.task_adherence(respond)` | BYO-judge **tool_call** alignment check — the runner threads the user turn into `Context.instruction`; wire via `rules.llm_judge(..., stage="tool_call", action="flag")` |
 | `Result.guardrail_decisions` | list on `Result` | every trip/flag recorded during the run |
 | `guardrail` | `@guardrail(stage=…)` | decorate a `check(payload, ctx)` into a `Guardrail` |
 | `GuardrailTripped` | exception | raised on a fail-closed block; carries `.decisions` |
+
+### Detection-tier adapters — call shapes
+
+The opt-in adapters and hosted rails are **detection tiers 3–4**: attach them like any other
+guardrail. They live in [cendor-guardrails](/docs/guardrails) — in Python they're also on the SDK's
+`rules`, but in **TypeScript they import from `@cendor/guardrails`** (not `@cendor/sdk`). Each takes a
+caller-supplied client, so no cloud SDK is bundled. The local family (a classifier you bring, a
+language guard, OpenAI's free moderation):
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.guardrails import rules
+
+local = [
+    rules.classifier(classify, action="block"),       # wrap your own classifier fn → score/label
+    rules.prompt_guard(),                              # Llama Prompt-Guard 2 ([promptguard] extra)
+    rules.language(["en", "de"]),                      # flag a language switch
+    rules.openai_moderation(client, action="block"),  # OpenAI's free moderation endpoint
+]
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { rules } from '@cendor/guardrails';   // detection-tier adapters live in the library, not @cendor/sdk
+
+const local = [
+  rules.classifier(classify, { action: 'block' }),    // wrap your own classifier fn → score/label
+  rules.language(['en', 'de']),                        // flag a language switch
+  rules.openaiModeration(client, { action: 'block' }),// OpenAI's free moderation endpoint
+];
+// prompt-injection classifier: Python-only rules.prompt_guard ([promptguard] extra) — no TS form yet
+```
+
+<!-- /tabs -->
+
+The cloud rails (a check runs on your vendor account; the verdict still lands as a **local**
+`guardrail_decision`):
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.guardrails import rules
+
+cloud = [
+    rules.bedrock_guardrail(bedrock, "gr-abc123"),               # AWS ApplyGuardrail
+    rules.azure_content_safety(azure_client),                    # Azure Prompt Shields
+    rules.model_armor(armor_client, "projects/p/locations/l/templates/t"),  # Google Model Armor
+]
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { rules } from '@cendor/guardrails';
+
+const cloud = [
+  rules.bedrockGuardrail(bedrock, 'gr-abc123'),               // AWS ApplyGuardrail
+  rules.azureContentSafety(azureClient),                       // Azure Prompt Shields
+  rules.modelArmor(armorClient, 'projects/p/locations/l/templates/t'),  // Google Model Armor
+];
+```
+
+<!-- /tabs -->
 
 ## How it works
 

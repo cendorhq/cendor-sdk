@@ -66,8 +66,8 @@ mix them in the same process); it's continuous, never a migration.
 graph TD
     APP["your application"]
     SDK["cendor-sdk<br/>Agent · tool · run"]
-    LIBS["six libraries<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
-    CORE["cendor-core<br/>instrument() seam + event bus"]
+    LIBS["six governance tools<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
+    CORE["cendor-core<br/>the foundation — instrument() seam + event bus"]
     PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
 
     APP -->|"door 2: the SDK loop"| SDK --> CORE
@@ -84,6 +84,7 @@ graph TD
 | Page | What it covers |
 |---|---|
 | [Getting started](getting-started.md) | Install, a first governed agent, and where each concept lives. |
+| [Architecture](architecture.md) | The two layers — the loop on top, the seven libraries beneath — and where each library is used in the SDK. |
 | [Agents & the loop](agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal. |
 | [Governance](governance.md) | Budgets, spend attribution, audit + redaction, record/replay testing. |
 | [Guardrails](guardrails.md) | `Agent(guardrails=[…])` — a deterministic gate at four stages (input / tool call / tool output / output). |
@@ -128,6 +129,10 @@ SDK surface each library powers:
 | `guard(Policy…)` / `AuditLog` / `decision()` | acttrace | [/docs/acttrace](/docs/acttrace) |
 | `cassette` record/replay / `EvalCase` | cassette | [/docs/cassette](/docs/cassette) |
 | the event bus / `instrument()` / provider detection | cendor-core | [/docs/core](/docs/core) |
+
+The full per-library map — every SDK symbol, the library beneath it, and where each library plugs
+into the loop — lives on [Architecture](architecture.md). These are **seven libraries**: the six
+governance tools above plus the `cendor-core` foundation they all ride.
 
 Every layer is optional — an ungoverned `run()` works with just `cendor-core` installed.
 

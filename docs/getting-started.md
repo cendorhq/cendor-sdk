@@ -185,6 +185,9 @@ regression tests.
 | Survive crashes, retries, long runs | [Production hardening](hardening.md) | — (SDK) |
 | Record once / replay; gate regressions in CI | [Eval & regression testing](eval.md) | [cassette](/docs/cassette) |
 
+The full map — every SDK symbol, the library that powers it, and where it plugs into the loop —
+is on [Architecture](architecture.md).
+
 > **Coming from the libraries?** Everything you already use — `budget`, `track`, `guard`,
 > `Policy`, `AuditLog`, `trace` — is the same object here, re-exported for one-import convenience.
 > Nothing to relearn. The reverse also holds: see [FAQ → libraries or SDK](faq.md).

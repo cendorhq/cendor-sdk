@@ -92,6 +92,32 @@ const resumed = store.load('user-42');    // remembers Alice
 
 <!-- /tabs -->
 
+### In-memory store (TypeScript) — `MemorySessionStore`
+
+TypeScript ships an in-memory keyed store — the ephemeral counterpart to `SqliteSessionStore`, handy
+for tests and short-lived processes where durability isn't needed. Python has no in-memory *store*
+class: a plain `Session` (or your own dict keyed by user) covers the same ground.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+> **TypeScript only.** Python has no in-memory session *store* — use a plain `Session` per
+> conversation, or a dict of them keyed by user. Durable storage is `SQLiteSessionStore`. See the
+> [parity matrix](/docs/languages).
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, run, MemorySessionStore } from '@cendor/sdk';
+
+const store = new MemorySessionStore();     // in-memory, keyed — nothing persisted
+const session = store.load('user-42');      // empty Session if unknown
+await run(agent, 'hi', { session });
+store.save('user-42', session);             // kept for this process only
+```
+
+<!-- /tabs -->
+
 ### Rolling summarization — `SummarizingSession`
 
 A long conversation eventually outgrows any window. `SummarizingSession` *folds* old turns into a

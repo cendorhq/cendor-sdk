@@ -173,12 +173,14 @@ const result = await using('tests/fixtures/run.json', () =>   // records once, r
 
 <!-- /tabs -->
 
-Record/replay is the [cassette](/docs/cassette) library, re-exported through the SDK. Replay is
-deterministic and offline — the same trajectory every time, no network, no keys — and replayed
-calls re-emit their recorded usage, so **cost and tokens are real on replay**. That's what makes
-spend a testable property; the [eval harness](eval.md) builds directly on it.
+Record/replay is the [cassette](/docs/cassette) library — the SDK's [eval harness](eval.md) drives
+it, but **cassette is not re-exported by the SDK**: import it from the umbrella as
+`from cendor import cassette` (Python) / `@cendor/cassette` (TypeScript), as the snippet above does.
+Replay is deterministic and offline — the same trajectory every time, no network, no keys — and
+replayed calls re-emit their recorded usage, so **cost and tokens are real on replay**. That's what
+makes spend a testable property; the eval harness builds directly on it.
 
-## How it works
+## Plugs into the stack
 
 The SDK adds no governance machinery of its own. Each wrapper attaches to a
 [`cendor-core`](/docs/core) seam, which is why the same line works under the SDK loop, under a
