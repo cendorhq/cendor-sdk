@@ -1,5 +1,12 @@
 # cendor-init changelog
 
+## 0.2.0 — 2026-07-11
+
+- `init --scaffold` is now **SDK-aware**: when the project declares/installs `cendor-sdk` (or
+  `@cendor/sdk` in the TS twin) it writes a governed `Agent(...)` + `run(...)` starter instead of the
+  libraries' `instrument()` + `budget` starter. Detection falls back to the libs starter otherwise.
+- Version snapshot refreshed to the 2026-07-11 shelf (`/releases` remains the source of truth).
+
 ## 0.1.1 — 2026-07-11
 
 - Remove the dead, undocumented `-y/--yes` flag (a vestige of the dropped interactive design).

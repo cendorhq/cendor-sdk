@@ -32,12 +32,9 @@ _ICON = {
 
 
 def _version() -> str:
-    try:
-        from importlib import metadata
+    from . import __version__
 
-        return metadata.version("cendor-init")
-    except Exception:
-        return "0.1.1"
+    return __version__
 
 
 def _parse_assistants(raw: list[str] | None) -> list[str] | None:

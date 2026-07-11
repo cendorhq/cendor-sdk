@@ -12,4 +12,10 @@ from .doctor import run_doctor
 from .initialize import run_init
 
 __all__ = ["run_init", "run_doctor", "__version__"]
-__version__ = "0.1.1"
+
+try:
+    from importlib import metadata as _metadata
+
+    __version__ = _metadata.version("cendor-init")
+except Exception:  # running from a checkout without installed dist metadata
+    __version__ = "0.2.0"
