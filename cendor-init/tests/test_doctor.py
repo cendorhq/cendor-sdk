@@ -88,3 +88,69 @@ def test_clean_project_exits_zero(tmp_path: Path):
     assert r.exit_code == 0
     assert _titles(r, "error") == []
     assert any(f.severity == "ok" for f in r.findings)
+
+
+def test_price_snapshot_staleness_warns(tmp_path: Path, monkeypatch):
+    import importlib.metadata as md
+
+    from cendor_init.detect import Detected
+    from cendor_init.doctor import Finding, _check_price_snapshot
+
+    snap = tmp_path / "prices.json"
+    snap.write_text('{"_updated": "2020-01-01", "models": {}}', encoding="utf-8")
+
+    class _File:
+        name = "prices.json"
+
+    class _Dist:
+        files = [_File()]
+
+        def locate_file(self, f):
+            return snap
+
+    monkeypatch.setattr(md, "distribution", lambda name: _Dist())
+    detected = Detected(
+        root=tmp_path,
+        ecosystem="python",
+        node=False,
+        python=True,
+        installed_pypi={"cendor-core": "1.5.1"},
+    )
+    out: list[Finding] = []
+    _check_price_snapshot(detected, out)
+    assert any("price snapshot" in f.title for f in out)
+    assert all(f.severity == "warn" for f in out)  # a hint, never an error
+
+
+def test_price_snapshot_fresh_is_silent(tmp_path: Path, monkeypatch):
+    import importlib.metadata as md
+    from datetime import date
+
+    from cendor_init.detect import Detected
+    from cendor_init.doctor import Finding, _check_price_snapshot
+
+    snap = tmp_path / "prices.json"
+    snap.write_text(
+        f'{{"_updated": "{date.today().isoformat()}", "models": {{}}}}', encoding="utf-8"
+    )
+
+    class _File:
+        name = "prices.json"
+
+    class _Dist:
+        files = [_File()]
+
+        def locate_file(self, f):
+            return snap
+
+    monkeypatch.setattr(md, "distribution", lambda name: _Dist())
+    detected = Detected(
+        root=tmp_path,
+        ecosystem="python",
+        node=False,
+        python=True,
+        installed_pypi={"cendor-core": "1.5.1"},
+    )
+    out: list[Finding] = []
+    _check_price_snapshot(detected, out)
+    assert out == []

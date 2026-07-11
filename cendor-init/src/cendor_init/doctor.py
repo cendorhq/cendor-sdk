@@ -201,6 +201,51 @@ def _check_py_versions(detected: Detected, out: list[Finding]) -> None:
         )
 
 
+_SNAPSHOT_UPDATED_RE = re.compile(r'"_updated"\s*:\s*"(\d{4}-\d{2}-\d{2})"')
+PRICE_SNAPSHOT_MAX_AGE_DAYS = 30
+
+
+def _check_price_snapshot(detected: Detected, out: list[Finding]) -> None:
+    """Warn when the installed cendor-core's bundled price snapshot is >30 days old.
+
+    Reads the installed dist's ``prices.json`` via importlib.metadata (no cendor import, still
+    offline). Skips silently when cendor-core isn't visible here (e.g. ``uvx`` isolation).
+    """
+    if "cendor-core" not in detected.installed_pypi:
+        return
+    try:
+        from datetime import date
+        from importlib import metadata
+
+        dist = metadata.distribution("cendor-core")
+        text = None
+        for f in dist.files or []:
+            if f.name == "prices.json":
+                located = Path(str(dist.locate_file(f)))
+                text = located.read_text(encoding="utf-8")
+                break
+        if not text:
+            return
+        m = _SNAPSHOT_UPDATED_RE.search(text)
+        if not m:
+            return
+        updated = date.fromisoformat(m.group(1))
+        age = (date.today() - updated).days
+    except Exception:
+        return  # a hint, never a doctor failure
+    if age > PRICE_SNAPSHOT_MAX_AGE_DAYS:
+        out.append(
+            Finding(
+                "warn",
+                f"Bundled price snapshot is {age} days old",
+                f"cendor-core's offline price table is dated {updated.isoformat()}. Models released "
+                "since then estimate at $0 (a warn-once blind spot for USD budgets) until the table "
+                "is refreshed.",
+                "Call `prices.refresh()` at startup, or upgrade: pip install -U cendor-core",
+            )
+        )
+
+
 def run_doctor(root: Path) -> DoctorResult:
     root = Path(root)
     detected = detect_project(root)
@@ -216,6 +261,7 @@ def run_doctor(root: Path) -> DoctorResult:
     if detected.python:
         _check_py_providers(detected, src, findings)
         _check_py_versions(detected, findings)
+        _check_price_snapshot(detected, findings)
 
     if detected.node:
         findings.append(
