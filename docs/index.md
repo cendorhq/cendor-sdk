@@ -6,7 +6,7 @@ foundation, not a plugin. Local-first · no servers · Apache-2.0. Available for
 **Python** (`pip install cendor-sdk`) and **TypeScript/JavaScript** (`npm i @cendor/sdk`).
 
 > **Building with Copilot, Claude Code, or Cursor?** The SDK ships inline Type Teach and a
-> paste-in trap sheet → [For AI assistants](/docs/for-ai-assistants), or wire it in one command
+> paste-in trap sheet → [For AI assistants](for-ai-assistants.md), or wire it in one command
 > with `npx @cendor/init` / `uvx cendor-init`.
 
 ## A first look
@@ -61,23 +61,24 @@ Both doors expose the **same primitives** — `budget`, `guard`, `Policy`, `Audi
 the *real* library objects, re-exported. Start on the SDK and drop down to the libraries later (or
 mix them in the same process); it's continuous, never a migration.
 
-```mermaid
-%%{init: {"flowchart": {"htmlLabels": false}} }%%
-graph TD
-    APP["your application"]
-    SDK["cendor-sdk<br/>Agent · tool · run"]
-    LIBS["six governance tools<br/>contextkit · squeeze · tokenguard · guardrails · cassette · acttrace"]
-    CORE["cendor-core<br/>the foundation — instrument() seam + event bus"]
-    PROV["provider SDKs<br/>OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure"]
-
-    APP -->|"door 2: the SDK loop"| SDK --> CORE
-    APP -->|"door 1: beneath your framework"| LIBS
-    LIBS --- CORE
-    CORE --> PROV
-
-    classDef seam fill:#2563EB,color:#ffffff,stroke:#1E40AF;
-    class CORE seam;
-```
+<div class="mm-doors" aria-label="Two doors into Cendor, both riding the cendor-core seam; your provider client is external">
+<div class="mm-drow">
+<div class="mm-door d1">
+<div class="mm-dnum">Door 1</div>
+<div class="mm-dt">the libraries</div>
+<p>Already using LangChain, LlamaIndex, or a provider client directly? Keep it — compose the seven libraries underneath with one <code>instrument()</code> wrap. <a href="/docs">Libraries docs →</a></p>
+</div>
+<div class="mm-door d2">
+<div class="mm-dnum">Door 2</div>
+<div class="mm-dt">cendor-sdk</div>
+<p>Starting fresh, or don't want to wire a framework together? The SDK gives you <code>Agent</code>, <code>tool</code>, and <code>run</code> with every governance layer one import away. <em>(These docs.)</em></p>
+</div>
+</div>
+<div class="mm-darrow">both doors ride ↓</div>
+<div class="mm-seam"><b>cendor-core</b> — the instrument() seam + event bus. The seven libraries subscribe here; the SDK's run() loop drives it.</div>
+<div class="mm-darrow">instrument() wraps your client ↓ to reach the models</div>
+<div class="mm-ext">your <b>provider client</b> — OpenAI · Anthropic · Gemini · Bedrock · Ollama · HF · Azure. External and optional; Cendor never pulls one in. <em>Not a layer of Cendor</em> — just what instrument() wraps.</div>
+</div>
 
 ## Pages
 
@@ -85,6 +86,7 @@ graph TD
 |---|---|
 | [Getting started](getting-started.md) | Install, a first governed agent, and where each concept lives. |
 | [Architecture](architecture.md) | The two layers — the loop on top, the seven libraries beneath — and where each library is used in the SDK. |
+| [For AI assistants](for-ai-assistants.md) | SDK-specific call-shape traps + the four ways (Type Teach, rules files, MCP, `init`) to make your assistant fluent. |
 | [Agents & the loop](agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal. |
 | [Governance](governance.md) | Budgets, spend attribution, audit + redaction, record/replay testing. |
 | [Guardrails](guardrails.md) | `Agent(guardrails=[…])` — a deterministic gate at four stages (input / tool call / tool output / output). |

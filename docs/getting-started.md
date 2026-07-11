@@ -6,7 +6,7 @@ with a recorded cassette).
 
 **Using an AI coding assistant?** Cendor's types teach the correct call-shape inline (on hover and
 completion), so Copilot / Claude / Cursor get it right as you type — and there's a trap-sheet you can
-paste into your assistant: [For AI assistants](/docs/for-ai-assistants).
+paste into your assistant: [For AI assistants](for-ai-assistants.md).
 
 **Fastest start.** `npx @cendor/init` (Node) or `uvx cendor-init` (Python) wires Cendor **and** your
 AI assistant in one step — it detects your project, writes the correct assistant rules files, can add

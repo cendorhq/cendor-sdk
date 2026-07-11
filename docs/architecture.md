@@ -14,7 +14,8 @@ delegates every *governance* concern (context, cost, safety, evidence, testing) 
 count that matters is **seven libraries**: the six tools plus the `cendor-core` foundation they all
 stand on.
 
-<div class="mm-strip" aria-label="One governed run() across the seven libraries the SDK is built on">
+<div class="mm-strip" aria-label="One governed run() across the seven libraries the SDK is built on, wrapped by the cendor-sdk run() loop">
+<div class="mm-ring">
 <div class="mm-flow">
 <div class="mm-phase">
 <div class="mm-plabel">before the call · pre-flight</div>
@@ -43,7 +44,8 @@ stand on.
 </div>
 </div>
 </div>
-<div class="mm-bus"><b>cendor-core</b> — the <em>instrument()</em> seam + one event bus. <b>cendor-sdk</b>'s <em>run()</em> loop rings around all of it: the loop drives each turn, and every stage above is a library subscribing on this bus, never a direct import. The SDK adds the loop, not the governance.</div>
+</div>
+<div class="mm-bus"><b>cendor-core</b> — the <em>instrument()</em> seam + one event bus beneath it all. Every stage inside the amber band is a library subscribing on this bus, never a direct import; the band itself is <b>cendor-sdk</b>'s <em>run()</em> loop, driving each turn. The SDK adds the loop, not the governance.</div>
 </div>
 
 Two libraries act on *both* sides of a call — **guardrails** gates the input and the output,
