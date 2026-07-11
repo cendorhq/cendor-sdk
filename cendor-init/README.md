@@ -29,7 +29,9 @@ uvx cendor-init doctor     # validate the wiring; exit 1 on hard problems (CI-us
    you pass `--force`.
 3. **Offers MCP setup** (`--mcp`) — drops the connect config for the Cendor MCP server (remote
    `mcp.cendor.ai` or local `uvx cendor-mcp` / `npx @cendor/mcp`) where it's absent.
-4. **Optional starter** (`--scaffold`) — a minimal, correct `instrument()` + budgeted-call example.
+4. **Optional starter** (`--scaffold`) — a minimal, correct starter for your language: a governed
+   **`Agent`** loop (budget + guardrails + `guard` + audit) when `cendor-sdk` / `@cendor/sdk` is
+   detected, otherwise an `instrument()` + budgeted-call example.
 
 The rules content is a copy of section 3 of the docs source of truth,
 [`for-ai-assistants`](https://cendor.ai/docs/for-ai-assistants).
@@ -58,7 +60,7 @@ uvx cendor-init --help
 | `--all` | write every assistant rules file, not just the detected ones |
 | `--assistant <list>` | comma-separated subset: `copilot,cursor,agents,claude,windsurf` |
 | `--mcp` | also drop MCP connect config where absent |
-| `--scaffold` | also write a correct `instrument()`+budget starter |
+| `--scaffold` | also write a correct starter — a governed `Agent` when the SDK is present, else `instrument()`+budget |
 | `--force` | overwrite an owned file (`.cursor/rules/cendor.mdc`) even if not ours |
 | `--dry-run` | show what would change without writing |
 

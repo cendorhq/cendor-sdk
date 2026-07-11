@@ -190,16 +190,80 @@ console.log(report(['feature'])); // spend grouped by tag — for free
 """
 
 
+_PY_SDK_SCAFFOLD = '''"""Minimal governed-agent starter (cendor-sdk). Offline-safe scaffold.
+
+Install:  pip install "cendor-sdk[openai]"
+Docs:     https://cendor.ai/docs/sdk/getting-started
+"""
+
+from cendor.sdk import Agent, run, budget, guard, rules, Policy, AuditLog
+
+
+def main() -> None:
+    agent = Agent(
+        name="assistant",
+        model="gpt-4o",
+        instructions="Answer using tools when helpful.",
+        guardrails=[rules.keyword_deny(["ignore previous instructions"], action="block")],
+        max_usd=0.50,  # per-agent cost cap — NOT budget=
+    )
+    log = AuditLog(system="assistant", risk_tier="limited", path="audit.jsonl")
+
+    # budget -> tokenguard pre-flight; guard -> acttrace PII redaction + audit chain
+    with budget(usd=0.25, on_exceed="block"), guard(Policy.default(), audit=log):
+        result = run(agent, "Summarize today's standup notes.", audit=log)
+
+    print(result.output, result.cost)  # the answer + Decimal money — governed & audited
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+_NODE_SDK_SCAFFOLD = """// Minimal governed-agent starter (@cendor/sdk). Offline-safe scaffold.
+//
+// Install:  npm i @cendor/sdk openai
+// Docs:     https://cendor.ai/docs/sdk/getting-started
+import { Agent, run, withBudget, guard, rules, Policy, AuditLog } from '@cendor/sdk';
+
+const agent = new Agent({
+  name: 'assistant',
+  model: 'gpt-4o',
+  instructions: 'Answer using tools when helpful.',
+  guardrails: [rules.keywordDeny(['ignore previous instructions'], { action: 'block' })],
+  maxUsd: 0.5, // per-agent cost cap — NOT budget=
+});
+const log = new AuditLog('assistant', { riskTier: 'limited', path: 'audit.jsonl' });
+
+// budget -> tokenguard pre-flight; guard -> acttrace PII redaction + audit chain
+const result = await withBudget({ usd: 0.25, onExceed: 'block' }, () =>
+  guard({ policy: Policy.default(), audit: log }, () =>
+    run(agent, "Summarize today's standup notes.", { audit: log })));
+
+console.log(result.output, result.cost?.toString()); // governed & audited
+"""
+
+
+def _sdk_detected(detected: Detected) -> bool:
+    """Is the cendor SDK (the "second door") declared/installed? Then scaffold a governed agent."""
+    return (
+        "cendor-sdk" in detected.declared_pypi
+        or "cendor-sdk" in detected.installed_pypi
+        or "@cendor/sdk" in detected.declared_npm
+    )
+
+
 def _scaffold_target(detected: Detected) -> tuple[str, str] | None:
     lang = (
         "python"
         if (detected.python and not detected.node)
         else ("node" if detected.node else detected.ecosystem)
     )
+    sdk = _sdk_detected(detected)
     if lang == "python":
-        return "cendor_quickstart.py", _PY_SCAFFOLD
+        return "cendor_quickstart.py", (_PY_SDK_SCAFFOLD if sdk else _PY_SCAFFOLD)
     if lang == "node":
-        return "cendor-quickstart.mjs", _NODE_SCAFFOLD
+        return "cendor-quickstart.mjs", (_NODE_SDK_SCAFFOLD if sdk else _NODE_SCAFFOLD)
     return None
 
 

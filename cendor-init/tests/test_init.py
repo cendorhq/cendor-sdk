@@ -85,3 +85,30 @@ def test_scaffold_node(tmp_path: Path):
     body = _read(tmp_path, "cendor-quickstart.mjs")
     assert "budget({ usd: 0.5" in body
     assert "instrument(new OpenAI())" in body
+
+
+def test_scaffold_python_sdk(tmp_path: Path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="x"\nversion="0.1.0"\ndependencies=["cendor-sdk>=1.6"]\n',
+        encoding="utf-8",
+    )
+    run_init(InitOptions(root=tmp_path, assistants=["agents"], scaffold=True))
+    body = _read(tmp_path, "cendor_quickstart.py")
+    assert "from cendor.sdk import Agent" in body
+    assert "max_usd=0.50" in body
+    assert "guard(Policy.default()" in body
+    assert "from cendor.core import instrument" not in body
+
+
+def test_scaffold_node_sdk(tmp_path: Path):
+    (tmp_path / "package.json").write_text(
+        '{"name":"x","version":"1.0.0","dependencies":{"@cendor/sdk":"^0.9.0"}}',
+        encoding="utf-8",
+    )
+    run_init(InitOptions(root=tmp_path, assistants=["agents"], scaffold=True))
+    body = _read(tmp_path, "cendor-quickstart.mjs")
+    assert "from '@cendor/sdk'" in body
+    assert "new Agent(" in body
+    assert "withBudget(" in body
+    assert "rules.keywordDeny" in body
+    assert "instrument(new OpenAI())" not in body
