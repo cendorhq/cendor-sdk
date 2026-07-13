@@ -105,6 +105,8 @@ def _isolate():
 
     tg.reset()
     providers._client_cache.clear()
+    providers._placeholder_hints.clear()
     yield
     tg.reset()
     providers._client_cache.clear()
+    providers._placeholder_hints.clear()

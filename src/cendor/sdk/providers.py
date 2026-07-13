@@ -45,6 +45,17 @@ if TYPE_CHECKING:
     from .tools import Tool
 
 
+class MissingAPIKeyError(RuntimeError):
+    """A live provider call failed to authenticate and no API key was ever supplied.
+
+    The SDK builds the provider client with a deliberate keyless *placeholder* so offline flows
+    (cassette replay, pre-flight budget blocks) work without credentials. When a *live* call is then
+    made and the provider rejects the placeholder with a 401, this replaces the provider's opaque
+    error with an actionable one that names the env var to set. It never fires when a real key (or a
+    pre-built ``client=``) was supplied, nor on non-auth errors, nor on keyless offline flows.
+    """
+
+
 # --------------------------------------------------------------------------- normalized response
 
 
@@ -236,6 +247,53 @@ def _gemini_parts(content: Any) -> list[dict]:
 
 _client_cache: dict[tuple, Any] = {}
 
+# Clients built with the keyless placeholder are recorded here, keyed by ``id`` (stable — the cache
+# holds them alive). Their create method is then wrapped so a placeholder 401 becomes a clear hint.
+_placeholder_hints: dict[int, str] = {}
+
+
+def _is_auth_error(exc: BaseException) -> bool:
+    """Whether ``exc`` is a provider auth failure (a 401/403 or an ``AuthenticationError`` type)."""
+    for obj in (exc, getattr(exc, "response", None)):
+        status = getattr(obj, "status_code", None)
+        if status is None:
+            status = getattr(obj, "status", None)
+        if status in (401, 403):
+            return True
+    return type(exc).__name__ in {"AuthenticationError", "PermissionDeniedError"}
+
+
+async def _await_with_hint(awaitable: Any, message: str) -> Any:
+    try:
+        return await awaitable
+    except Exception as exc:  # noqa: BLE001 - re-raise all; only auth errors get the hint
+        if _is_auth_error(exc):
+            raise MissingAPIKeyError(message) from exc
+        raise
+
+
+def _wrap_create_with_hint(create: Callable[..., Any], message: str) -> Callable[..., Any]:
+    """Wrap ``create`` so a placeholder-key auth failure raises :class:`MissingAPIKeyError`.
+
+    Works for sync and async clients (and streamed calls): a synchronous failure is caught at call
+    time; an awaitable result is re-wrapped so the failure is caught when it is awaited. On success
+    it is a pure pass-through, so it is only ever installed on placeholder-backed clients.
+    """
+
+    @functools.wraps(create)
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
+        try:
+            result = create(*args, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - re-raise all; only auth errors get the hint
+            if _is_auth_error(exc):
+                raise MissingAPIKeyError(message) from exc
+            raise
+        if inspect.isawaitable(result):
+            return _await_with_hint(result, message)
+        return result
+
+    return wrapped
+
 
 def _ensure_async_detectable(client: Any, path: tuple[str, ...]) -> None:
     """Make an async ``create`` method visible to ``inspect.iscoroutinefunction``.
@@ -275,11 +333,31 @@ class Provider:
     name: str = ""
     #: dotted path from the client to the create method, e.g. ("chat", "completions", "create").
     _create_path: tuple[str, ...] = ()
+    #: The provider's standard key env var, named in the missing-key hint. ``None`` ⇒ this provider
+    #: has no API-key concept (Bedrock/Ollama/Gemini/Foundry Local) and never emits the hint.
+    key_env_var: str | None = None
 
     # --- client construction --------------------------------------------------------------------
 
     def _raw_client(self, async_: bool, config: dict) -> Any:  # pragma: no cover - overridden
         raise NotImplementedError(f"client construction not available for provider {self.name!r}")
+
+    def _credential_env_vars(self) -> tuple[str, ...]:
+        """Env vars that count as "a real key is present" (overridden where more are read)."""
+        return (self.key_env_var,) if self.key_env_var else ()
+
+    def _uses_placeholder(self, config: dict) -> bool:
+        """Whether client construction fell back to the keyless placeholder (⇒ hint a live 401)."""
+        if not self.key_env_var or config.get("api_key"):
+            return False
+        return not any(os.environ.get(v) for v in self._credential_env_vars())
+
+    def _missing_key_message(self) -> str:
+        return (
+            f"No API key was found for the {self.name!r} provider — set the {self.key_env_var} "
+            f"environment variable (or pass api_key=... / client=... to Agent()). "
+            f"Docs: https://cendor.ai/docs/sdk/providers#api-keys--credentials"
+        )
 
     def adopt(self, client: Any, async_: bool) -> Any:
         """Prepare a client for the loop: ensure async detection, then instrument (idempotent)."""
@@ -295,13 +373,22 @@ class Provider:
         if client is None:
             client = self.adopt(self._raw_client(async_, config), async_)
             _client_cache[key] = client
+            if self._uses_placeholder(config):
+                _placeholder_hints[id(client)] = self._missing_key_message()
         return client
 
     def create_method(self, client: Any) -> Callable[..., Any]:
-        """The instrumented create method on ``client`` for this provider."""
+        """The instrumented create method on ``client`` for this provider.
+
+        A placeholder-backed client's create method is wrapped so a provider 401 raises an
+        actionable :class:`MissingAPIKeyError` naming the env var to set, instead of the bare 401.
+        """
         target: Any = client
         for attr in self._create_path:
             target = getattr(target, attr)
+        message = _placeholder_hints.get(id(client))
+        if message is not None:
+            return _wrap_create_with_hint(target, message)
         return target
 
     # --- outbound -------------------------------------------------------------------------------
@@ -359,6 +446,7 @@ class OpenAIChatProvider(Provider):
     """OpenAI Chat Completions."""
 
     name = "openai"
+    key_env_var: str | None = "OPENAI_API_KEY"
     _create_path: tuple[str, ...] = ("chat", "completions", "create")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
@@ -486,6 +574,7 @@ class OpenAIResponsesProvider(Provider):
     """OpenAI Responses API (input=/output=)."""
 
     name = "openai_responses"
+    key_env_var = "OPENAI_API_KEY"
     _create_path = ("responses", "create")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
@@ -566,6 +655,7 @@ class AnthropicProvider(Provider):
     """Anthropic Messages API."""
 
     name = "anthropic"
+    key_env_var = "ANTHROPIC_API_KEY"
     _create_path = ("messages", "create")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
@@ -886,9 +976,21 @@ class BedrockProvider(Provider):
     _create_path = ("converse",)
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
+        if config.get("api_key"):
+            raise ValueError(
+                "Bedrock does not take api_key= — it authenticates via the AWS credential chain "
+                "(AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, an AWS profile, or an IAM role) plus "
+                "AWS_REGION. Set those in your environment, or hand Agent(client=...) a pre-built "
+                "boto3 bedrock-runtime client. "
+                "Docs: https://cendor.ai/docs/sdk/providers#api-keys--credentials"
+            )
         import boto3  # type: ignore
 
-        return boto3.client("bedrock-runtime", **config)
+        # ``base_url`` maps to boto3's ``endpoint_url`` (region comes from the AWS env, not config).
+        kwargs = {k: v for k, v in config.items() if k not in ("api_key", "base_url")}
+        if config.get("base_url"):
+            kwargs["endpoint_url"] = config["base_url"]
+        return boto3.client("bedrock-runtime", **kwargs)
 
     def format_tools(self, tools: list[Tool]) -> Any:
         if not tools:
@@ -957,10 +1059,21 @@ class OllamaProvider(Provider):
     _create_path = ("chat",)
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
+        if config.get("api_key"):
+            raise ValueError(
+                "Ollama is local and needs no API key — drop api_key= (reach a remote Ollama host "
+                "with base_url= or the OLLAMA_HOST env var). "
+                "Docs: https://cendor.ai/docs/sdk/providers#api-keys--credentials"
+            )
         import ollama  # type: ignore
 
+        # The ollama client's endpoint kwarg is ``host=`` (passing ``base_url=`` collides with the
+        # httpx client it builds); map it, and pass any other config through untouched.
+        kwargs = {k: v for k, v in config.items() if k not in ("api_key", "base_url")}
+        if config.get("base_url"):
+            kwargs["host"] = config["base_url"]
         cls = ollama.AsyncClient if async_ else ollama.Client
-        return cls(**config)
+        return cls(**kwargs)
 
     def format_tools(self, tools: list[Tool]) -> Any:
         return [t.to_openai() for t in tools] or None
@@ -1058,7 +1171,11 @@ class HuggingFaceProvider(OpenAIChatProvider):
     """
 
     name = "huggingface"
+    key_env_var = "HF_TOKEN"
     _create_path: tuple[str, ...] = ("chat_completion",)
+
+    def _credential_env_vars(self) -> tuple[str, ...]:
+        return ("HF_TOKEN", "HUGGINGFACEHUB_API_TOKEN")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         from huggingface_hub import AsyncInferenceClient, InferenceClient  # type: ignore
@@ -1124,6 +1241,10 @@ class AzureFoundryProvider(OpenAIChatProvider):
     """
 
     name = "azure"
+    key_env_var = "AZURE_OPENAI_API_KEY"
+
+    def _credential_env_vars(self) -> tuple[str, ...]:
+        return ("AZURE_OPENAI_API_KEY", "AZURE_INFERENCE_CREDENTIAL", "AZURE_AI_API_KEY")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         import openai
@@ -1154,6 +1275,10 @@ class AzureFoundryResponsesProvider(OpenAIResponsesProvider):
     """
 
     name = "azure_responses"
+    key_env_var = "AZURE_OPENAI_API_KEY"
+
+    def _credential_env_vars(self) -> tuple[str, ...]:
+        return ("AZURE_OPENAI_API_KEY", "AZURE_INFERENCE_CREDENTIAL", "AZURE_AI_API_KEY")
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         return AzureFoundryProvider()._raw_client(async_, config)
@@ -1191,6 +1316,7 @@ class FoundryLocalProvider(OpenAIChatProvider):
     """
 
     name = "foundry_local"
+    key_env_var = None  # local, keyless — never emit the missing-key hint
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         import openai

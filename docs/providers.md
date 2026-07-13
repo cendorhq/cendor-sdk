@@ -62,8 +62,10 @@ resolve in this order — the same in both languages:
 The SDK never reads `.env` files — load them yourself (`python-dotenv`, `node --env-file=.env`).
 If no key is found, the client is still constructed with a placeholder so **keyless flows work**
 (cassette replay, pre-flight budget blocks) — a live call then fails with the provider's own
-authentication error. If you see a 401 mentioning `cendor-sdk-placeholder`, set the env var above
-or pass `api_key=`.
+authentication error. From **cendor-sdk 1.6.2 / @cendor/sdk 0.9.2** that failure is caught and
+re-raised as a `MissingAPIKeyError` that names the env var to set and links back here (older
+versions surface the provider's bare 401 mentioning `cendor-sdk-placeholder` — set the env var
+above or pass `api_key=`).
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -436,8 +438,11 @@ follows the [resolution order above](#api-keys--credentials); the per-provider s
   (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, an `AWS_PROFILE`, or an
   IAM role) plus a region (`AWS_REGION` / `AWS_DEFAULT_REGION`). Bedrock ids are dotted
   (`anthropic.claude-…`), so keep `provider="bedrock"` explicit. Like Gemini, no native async.
+  Passing `api_key=` raises a clear error (Bedrock has no key); `base_url=` maps to the boto3 /
+  AWS SDK `endpoint_url` / `endpoint` for a gateway.
 - **Ollama** — local, no key. A remote daemon is reached via `OLLAMA_HOST` (the ollama SDK's own
-  env var) or `base_url=` / `baseURL`.
+  env var) or `base_url=` / `baseURL` (mapped to the client's `host`). Passing `api_key=` raises a
+  clear error — Ollama is local and needs none.
 
 ## Provider-author reference
 

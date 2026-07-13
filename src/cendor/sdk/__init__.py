@@ -82,7 +82,7 @@ from .orchestration import (
 )
 from .otel import live_spans, span_tree
 from .pricing import register_model_price
-from .providers import ParsedResponse, ToolInvocation
+from .providers import MissingAPIKeyError, ParsedResponse, ToolInvocation
 from .rag import Hit, VectorIndex
 from .resilience import RetryPolicy
 from .result import (
@@ -154,6 +154,7 @@ __all__ = [
     "Step",
     "ParsedResponse",
     "ToolInvocation",
+    "MissingAPIKeyError",
     # streaming events (run.stream / run.astream)
     "StreamEvent",
     "TextDelta",
