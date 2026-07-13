@@ -4,6 +4,21 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] — 2026-07-13
+Provider-auth hardening: the first-run "where's my key?" paper cuts now fail loud and actionable.
+No change for correct code.
+
+### Changed
+- A live provider call that fails to authenticate **while the keyless placeholder is in play** now
+  raises `MissingAPIKeyError` (exported from `cendor.sdk`) naming the exact env var to set
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `AZURE_OPENAI_API_KEY`, `HF_TOKEN`) and linking the docs,
+  instead of the provider's bare 401. It never fires when a real key or a pre-built `client=` was
+  supplied, on non-auth errors, or on keyless offline flows (cassette replay, pre-flight blocks).
+- **Bedrock**: passing `api_key=` now raises a clear error (Bedrock authenticates via the AWS
+  credential chain, not an API key); `base_url=` maps to boto3's `endpoint_url`.
+- **Ollama**: `base_url=` maps to the ollama client's `host=` (it previously collided with the
+  underlying httpx client and crashed); passing `api_key=` raises a clear "local, no key" error.
+
 ## [1.6.1] — 2026-07-11
 AI-assistant onboarding: inline Type Teach ships inside the package, plus the bundled
 integration guide. No runtime behavior change for correct code.
