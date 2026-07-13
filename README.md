@@ -18,7 +18,10 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 > **The second door into Cendor.** One brand, two doors: compose the
 > [seven libraries](https://github.com/cendorhq/cendor-libs) beneath *your* framework, or take the whole
 > loop — governed — with this SDK. The `budget` / `guard` / `Policy` / `AuditLog` / `trace` you import
-> here are the **real** library objects, re-exported for one-import convenience.
+> here are the **real** library objects, re-exported for one-import convenience — and since 1.7.0
+> that is CI-verified: an identity test suite pins every re-export (`sdk.guard is acttrace.guard`),
+> `embed()` is governed pre-flight (a keyless USD budget blocks it before it fires), and the
+> pii/secrets bridge honors per-category policy actions.
 
 ---
 
