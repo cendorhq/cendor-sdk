@@ -558,3 +558,33 @@ def test_per_provider_tool_formatting():
     assert gemini[0]["function_declarations"][0]["name"] == "search"
     bedrock = get_provider("bedrock").format_tools([search])
     assert bedrock["tools"][0]["toolSpec"]["name"] == "search"
+
+
+def test_register_model_price_survives_prices_refresh(monkeypatch):
+    # 1.7.0 writes through core's contractual prices._register — a refresh() no longer drops it.
+    import contextlib
+    import io
+    import json
+    from decimal import Decimal
+
+    from cendor.core import prices
+
+    from cendor.sdk.pricing import register_model_price
+
+    prices._reset()
+    try:
+        register_model_price("cendor-refresh-survivor", input=1.00, output=2.00)  # per 1M
+        payload = json.dumps(
+            {"_updated": "2099-01-01", "models": {"gpt-4o": {"input": 0.001, "output": 0}}}
+        )
+
+        @contextlib.contextmanager
+        def fake_urlopen(url, timeout=5.0):
+            yield io.BytesIO(payload.encode("utf-8"))
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        assert prices.refresh() is True
+        cost = prices.estimate("cendor-refresh-survivor", 1_000_000, 0)
+        assert cost.amount == Decimal("1")  # the registration survived the table swap
+    finally:
+        prices._reset()

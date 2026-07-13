@@ -205,6 +205,9 @@ artifacts; put them on shared storage if processes must hand off.
 - **Summarization is lossy by design.** `SummarizingSession` keeps the gist, not the transcript;
   when the verbatim record matters, that's the [audit chain](governance.md)'s job.
 - **`context_budget` trims silently past the budget** — deliberately. Read the
-  `AssemblyReport` (or the audit entry) when you need to know what was dropped.
+  `AssemblyReport` (or the audit entry) when you need to know what was dropped. An assembly
+  *failure* is silent but **observable** (since 1.7.0): the fallback to raw messages emits a
+  `ContextBudgetFallback` diagnostic on core's bus (`from cendor.sdk.runner import
+  ContextBudgetFallback`) — subscribe and alert on it if a fallback matters to you.
 - **No distributed memory.** Stores are local files by design; sharing them across machines is
   your storage layer's job, not the SDK's.

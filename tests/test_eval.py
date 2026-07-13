@@ -106,3 +106,33 @@ def test_eval_all_pass(build, tmp_path):
     )
     assert report.ok
     report.assert_ok()  # does not raise
+
+
+def test_eval_case_normalizer_is_forwarded_to_cassette(monkeypatch):
+    # EvalCase.normalizer rides into cassette.using(path, mode="replay", normalizer=...)
+    import cendor.cassette as cassette_mod
+
+    from cendor.sdk import Agent, EvalCase
+    from cendor.sdk.eval import _evaluate_one
+
+    seen: dict = {}
+    real_using = cassette_mod.using
+
+    def spy_using(path, mode="auto", normalizer=None, redact=True):
+        seen["mode"] = mode
+        seen["normalizer"] = normalizer
+        return real_using(path, mode=mode, normalizer=normalizer, redact=redact)
+
+    monkeypatch.setattr(cassette_mod, "using", spy_using)
+
+    def norm(call):
+        return {"model": getattr(call, "model", "")}
+
+    agent = Agent(name="t", model="gpt-4o", instructions="x")
+    case = EvalCase(name="n", input="hi", cassette="does-not-matter.json", normalizer=norm)
+    try:
+        _evaluate_one(agent, case)
+    except Exception:  # noqa: BLE001, S110 - replay may fail (no cassette); the forward is the point
+        pass
+    assert seen.get("mode") == "replay"
+    assert seen.get("normalizer") is norm

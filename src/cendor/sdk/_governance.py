@@ -1,10 +1,9 @@
-"""Thin governance wiring the SDK owns: ``guard`` (a context manager) and ``_scope``.
+"""Per-agent governance wiring the SDK owns: ``_scope``.
 
-``acttrace.guard()`` returns a bare pre-call interceptor (you install it on core's interceptor
-seam yourself). The SDK exposes ``guard`` as a **context manager** so it reads like ``budget()`` /
-``track()`` and composes in one ``with`` line — the whole reason it's in the re-export surface
-(plan §4). It installs the acttrace interceptor for the duration and removes it on exit; the actual
-redact/block/flag logic and the audit recording are 100% acttrace's, riding core's seam.
+``cendor.sdk.guard`` needs no wrapper anymore: since ``cendor-acttrace`` 1.5.0, ``guard()``'s
+return is **dual-shape** (a plain interceptor that is also a context manager installing/removing
+itself on core's seam), so the SDK re-exports the identical library object —
+``cendor.sdk.guard is cendor.acttrace.guard``. The wrapper that used to live here is gone.
 
 ``_scope`` is the shared per-agent governance wrapper (``track`` + optional ``max_usd`` budget).
 It lives in this leaf module — which imports nothing from :mod:`runner`/:mod:`orchestration` — so
@@ -16,8 +15,6 @@ from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any
-
-from cendor.core.instrument import add_interceptor, remove_interceptor
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -39,30 +36,3 @@ def _scope(agent: Agent) -> Any:
         if agent.max_usd is not None:
             stack.enter_context(budget(usd=agent.max_usd, on_exceed="block"))
         yield
-
-
-@contextmanager
-def guard(policy: Any = None, *, audit: Any = None, on_block: Any = None) -> Any:
-    """Install an ``acttrace`` policy guard on core's interceptor seam for the block's duration.
-
-    Redacts PII **before** the provider sees it, blocks disallowed content, and flags the rest —
-    per the ``Policy``. When ``audit`` is given, each action is recorded on the hash-chained log.
-
-    ```python
-    from cendor.sdk import guard, Policy, AuditLog
-    log = AuditLog(system="support", path="audit.jsonl")
-    with guard(Policy.gdpr(), audit=log):
-        run(agent, "email me at alice@example.com", audit=log)
-    ```
-    """
-    from cendor.acttrace import guard as _acttrace_guard
-
-    if on_block is not None:
-        interceptor = _acttrace_guard(policy, audit=audit, on_block=on_block)
-    else:
-        interceptor = _acttrace_guard(policy, audit=audit)
-    add_interceptor(interceptor)
-    try:
-        yield interceptor
-    finally:
-        remove_interceptor(interceptor)

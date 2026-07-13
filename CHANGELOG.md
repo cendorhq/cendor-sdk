@@ -4,6 +4,23 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-07-14
+The SDK inherits the libraries — verified. `guard` is now the identical acttrace object, embeddings are governed pre-flight, the pii bridge honors per-category actions, and a new parity/identity test suite pins every re-export so drift fails the build. Floors: `cendor-core>=1.6`, `cendor-acttrace>=1.5`.
+
+### Changed
+- **`guard` is the identical `cendor.acttrace.guard` object** (`cendor.sdk.guard is cendor.acttrace.guard`). acttrace 1.5.0's return is dual-shape (a raw interceptor that is also a context manager), so the SDK's context-manager wrapper is deleted. Existing `with guard(policy, audit=…, on_block=…):` code keeps working unchanged; `PolicyViolation` (the default block exception) is now exported from `cendor.sdk` so you can catch it without a lib import.
+- **`embed()`/`aembed()` are governed pre-flight.** The embeddings call now rides the instrumented client and core (≥ 1.6) captures it — so a keyless `budget(usd=…, on_exceed="block")` refuses an over-budget embed *before* it fires and a `guard(...)` can redact the text before the provider sees it. The SDK's hand-built emit shim is deleted (no double emission; `metadata["embedding"]` and trace correlation unchanged).
+- **Behavior fix — `rules.pii`/`secrets`/`entropy` honor per-category policy actions** (via acttrace's new `resolve_findings`, the same resolution `guard()` applies). A category the policy resolves to `block` now blocks and a `redact` category is scrubbed **regardless of `action=`**; the explicit `action=` param applies only to findings the policy leaves at flag tier. Concretely: `pii(Policy.gdpr(), action="redact")` now *blocks* a `special_category` finding instead of merely scrubbing it. To purely observe, use an all-flag policy — not `action="flag"`.
+- **`Result.usage` aggregates through core's field-complete `Usage` arithmetic** (`sum_usage`) — a future `Usage` field can no longer silently vanish from the aggregate.
+- **`register_model_price` writes through core's contractual `prices._register` hook** — registrations now survive `prices.refresh()` (they used to be dropped with the table swap).
+- **Never-retry is `isinstance`-matched** on the real `BudgetExceeded`/`PolicyViolation` classes (a lib exception rename can no longer silently turn never-retry into retry).
+
+### Added
+- **New re-exports:** `PolicyViolation` (acttrace); `GuardrailDecision`, `Verdict` (guardrails — the types of `Result.guardrail_decisions`); `LLMCall`, `ToolCall`, `Usage`, `Money` (core — typing parity with `@cendor/sdk`); `downgrades`, `clamps` (tokenguard — see what a pre-flight downgrade/clamp rerouted).
+- **`EvalCase(normalizer=…)`** — forwarded to cassette's replay matching, so prompts embedding timestamps/uuids still replay.
+- **`ContextBudgetFallback` bus event** — a failed `context_budget` assembly still falls back silently to raw messages, but now emits a diagnostic on core's bus (`from cendor.sdk.runner import ContextBudgetFallback`): silent but observable.
+- **SDK↔lib parity/identity test suite** (`tests/test_lib_parity.py`): `is`-pins every documented re-export, diffs `sdk.rules` against the library catalogue with a reviewed exclusion allowlist, pins the lib signatures the SDK forwards (a new lib kwarg fails the build instead of lagging silently), and carries the shim-expiry harness for future workarounds.
+
 ## [1.6.2] — 2026-07-13
 Provider-auth hardening: the first-run "where's my key?" paper cuts now fail loud and actionable.
 No change for correct code.

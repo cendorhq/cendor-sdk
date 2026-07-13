@@ -147,7 +147,7 @@ acttrace's detector catalogue into the Gate as `rules.pii` / `secrets` / `entrop
 
 | SDK surface | What acttrace does there | Concept page |
 |---|---|---|
-| `guard(Policy…)`, `Policy`, `PolicyViolation` | process-global PII/secret redaction on the interceptor seam | [Governance → audit + redaction](governance.md#audit--redaction) |
+| `guard(Policy…)`, `Policy`, `PolicyViolation` | PII/secret redact/block/flag on the interceptor seam — `guard` is the **identical acttrace object** (dual-shape since 1.7.0: scope form or raw interceptor) | [Governance → audit + redaction](governance.md#audit--redaction) |
 | `AuditLog`, `verify(...)` | append every event to a tamper-evident chain; verify offline | [Governance → audit + redaction](governance.md#audit--redaction) |
 | `rules.pii` / `rules.secrets` / `rules.entropy` | acttrace detectors **bridged** into the Gate, gating all four stages (incl. `tool_output`) | [Guardrails → PII & secrets](guardrails.md#pii--secrets--bridged-from-acttrace) |
 
@@ -163,6 +163,7 @@ every other library cooperates through it.
 | SDK surface | What core does there | Concept page |
 |---|---|---|
 | the loop's model calls (`instrument`) | wrap the provider client once; publish a normalized `LLMCall` | [Agents & the loop → how it works](agents.md#how-it-works) |
+| `embed()` / `aembed()` | the embeddings call rides the instrumented client — core captures it (`metadata.embedding`) and pre-flight budgets/guards apply (core ≥ 1.6) | [Retrieval (RAG)](rag.md) |
 | `trace(...)` / `current_trace_id` | correlate every call & tool in a run under one id | [Agents & the loop](agents.md#how-it-works) |
 | `prices` / provider detection | count tokens, price usage, detect the provider from the model id | [Providers](providers.md) |
 
@@ -176,8 +177,8 @@ The canonical map of which library powers which SDK surface. (The [Home](index.m
 | I want to… | SDK surface | Library underneath |
 |---|---|---|
 | Understand `Agent` / `tool` / `run` / `Result` | the loop | [cendor-core](/docs/core) |
-| Fit history to a token budget | `Agent(context_budget=…)` | [contextkit](/docs/contextkit) (+ [squeeze](/docs/squeeze) when installed) |
-| Compress oversized blocks | *auto* via `evict="compress"` | [squeeze](/docs/squeeze) — no direct SDK symbol |
+| Fit history to a token budget | `Agent(context_budget=…)` | [contextkit](/docs/contextkit) |
+| Compress oversized blocks | via direct contextkit use — `Block(…, evict="compress")` | [squeeze](/docs/squeeze) — no direct SDK symbol |
 | Cap spend / attribute cost | `budget` / `track` / `report`, `Agent(max_usd=…)` | [tokenguard](/docs/tokenguard) |
 | Block / redact / flag at four stages | `Agent(guardrails=[…])`, `rules.*` | [cendor-guardrails](/docs/guardrails) |
 | Redact PII, keep tamper-evident evidence | `guard(Policy…)`, `AuditLog`, `verify` | [acttrace](/docs/acttrace) |

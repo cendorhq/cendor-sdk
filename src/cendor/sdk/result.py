@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from cendor.core.types import LLMCall, Money, ToolCall, Usage
+from cendor.core.types import LLMCall, Money, ToolCall, Usage, sum_usage
 from cendor.guardrails import GuardrailDecision
 
 
@@ -97,24 +97,12 @@ class Result:
 
     @property
     def usage(self) -> Usage:
-        """Aggregate token usage across every model turn of the run."""
-        inp = out = cached = reasoning = cache_write = 0
-        for s in self.llm_steps:
-            u = s.usage
-            if u is None:
-                continue
-            inp += u.input_tokens
-            out += u.output_tokens
-            cached += u.cached_tokens
-            reasoning += u.reasoning_tokens
-            cache_write += u.cache_write
-        return Usage(
-            input_tokens=inp,
-            output_tokens=out,
-            cached_tokens=cached,
-            reasoning_tokens=reasoning,
-            cache_write=cache_write,
-        )
+        """Aggregate token usage across every model turn of the run.
+
+        Summed through core's field-complete ``sum_usage`` — a future ``Usage`` field can never
+        silently vanish from this aggregate (it iterates the dataclass fields, not a hand list).
+        """
+        return sum_usage(s.usage for s in self.llm_steps if s.usage is not None)
 
     @property
     def cost(self) -> Money:

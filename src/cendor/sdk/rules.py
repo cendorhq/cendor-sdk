@@ -97,16 +97,24 @@ def _bridge(
     stages: Any,
     action: str,
     scan_policy: Any,
-    redact_policy: Any,
     groups: set[str] | None = None,
     categories: set[str] | None = None,
     timeout: float | None,
     on_error: str | None,
 ) -> Guardrail:
     """Build a :class:`Guardrail` whose check scans ``payload`` with ``acttrace.scan`` and enforces
-    the guardrail ``action`` on any actionable finding (``redact`` scrubs via ``acttrace.redact``).
-    The reason records only category names + counts — never a raw value (acttrace counts only)."""
-    from cendor.acttrace import redact, scan
+    **per-category** actions via ``acttrace.resolve_findings`` — the same resolution ``guard()``
+    applies, never flattened to one action. The policy's ``block``/``redact`` tiers are honored per
+    finding; the explicit ``action=`` param is the enforcement applied to findings the policy
+    leaves at **flag** tier. Precedence: any effective block → block; else any effective redact →
+    redact (scrubs exactly those categories via ``acttrace.redact``); else flag. The reason records
+    only category names + counts — never a raw value (acttrace counts only)."""
+    from cendor.acttrace import Policy, redact, resolve_findings, scan
+
+    def _reason(findings: list[Any]) -> str:
+        cats = ", ".join(sorted({f.category for f in findings}))
+        n = len(findings)
+        return f"{name}: {n} categor{'y' if n == 1 else 'ies'} detected ({cats})"
 
     def check(payload: Any, ctx: Context) -> Verdict | None:
         findings = [f for f in scan(payload, scan_policy) if f.action != "allow"]
@@ -116,13 +124,18 @@ def _bridge(
             findings = [f for f in findings if f.category in categories]
         if not findings:
             return None
-        cats = ", ".join(sorted({f.category for f in findings}))
-        n = len(findings)
-        reason = f"{name}: {n} categor{'y' if n == 1 else 'ies'} detected ({cats})"
-        if action == "redact":
-            cleaned, _ = redact(payload, redact_policy)
-            return Verdict("redact", reason=reason, replacement=cleaned)
-        return Verdict(action, reason=reason)
+        tiers = resolve_findings(findings)  # acttrace's own per-category resolution (guard's)
+        promoted = tiers["flag"] if action in ("block", "redact") else []
+        blocked = tiers["block"] + (promoted if action == "block" else [])
+        to_redact = tiers["redact"] + (promoted if action == "redact" else [])
+        if blocked:
+            return Verdict("block", reason=_reason(blocked))
+        if to_redact:
+            # Scrub exactly the effective-redact categories (policy-redact tier + promoted flags).
+            scrub = Policy(actions={f.category: "redact" for f in to_redact}, default="allow")
+            cleaned, _ = redact(payload, scrub)
+            return Verdict("redact", reason=_reason(to_redact), replacement=cleaned)
+        return Verdict("flag", reason=_reason(findings))
 
     return Guardrail(
         name=name,
@@ -144,12 +157,18 @@ def pii(
 ) -> Guardrail:
     """A guardrail over ``acttrace``'s full detector catalogue, governed by ``policy``.
 
-    ``policy`` (default :meth:`acttrace.Policy.default`, which redacts secrets + emails and flags
-    the rest) decides which categories are actionable; ``action`` decides what the guardrail does
-    on any finding — ``"redact"`` (default; scrubs via ``acttrace.redact``), ``"block"``, or
-    ``"flag"``. Pass ``Policy.gdpr()`` / ``Policy.pci()`` / ``Policy.strict()`` for a wider net.
-    Runs at every stage by default, so it also scans **tool outputs** — content ``guard()`` never
-    sees. For secrets-only or high-entropy-only variants, use :func:`secrets` / :func:`entropy`.
+    **Per-category actions are honored** (since 1.7.0, via ``acttrace.resolve_findings`` — the
+    same resolution ``guard()`` applies): a category the ``policy`` resolves to ``block`` blocks
+    and one it resolves to ``redact`` is scrubbed, regardless of ``action=``. The explicit
+    ``action=`` param — ``"redact"`` (default), ``"block"``, or ``"flag"`` — is the enforcement
+    applied to findings the policy leaves at **flag** tier. So
+    ``pii(Policy.gdpr(), action="redact")`` still *blocks* a ``special_category`` finding (gdpr
+    says block), and to purely observe use a policy whose actions are all ``flag``, not
+    ``action="flag"``. ``policy`` defaults to :meth:`acttrace.Policy.default` (redacts secrets +
+    emails, flags the rest); pass ``Policy.gdpr()`` / ``Policy.pci()`` / ``Policy.strict()`` for a
+    wider net. Runs at every stage by default, so it also scans **tool outputs** — content
+    ``guard()`` never sees. For secrets-only or high-entropy-only variants, use :func:`secrets` /
+    :func:`entropy`.
     """
     from cendor.acttrace import Policy
 
@@ -159,7 +178,6 @@ def pii(
         stages=stage,
         action=action,
         scan_policy=resolved,
-        redact_policy=resolved,
         timeout=timeout,
         on_error=on_error,
     )
@@ -184,7 +202,6 @@ def secrets(
         stages=stage,
         action=action,
         scan_policy=scoped,
-        redact_policy=scoped,
         groups={"secret"},
         timeout=timeout,
         on_error=on_error,
@@ -221,7 +238,6 @@ def entropy(
         stages=stage,
         action=action,
         scan_policy=scoped,
-        redact_policy=scoped,
         categories={"high_entropy_secret"},
         timeout=timeout,
         on_error=on_error,

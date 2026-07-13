@@ -15,7 +15,6 @@ per unpriced model under ``on_exceed="block"``). Three ways to close that gap:
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
 
 from cendor.core import prices as _prices
 
@@ -36,8 +35,9 @@ def register_model_price(
     Rates are given per 1M tokens by default (``per="1M"``; also ``"1K"`` or ``"token"``) and stored
     as exact per-token ``Decimal``. After registering, ``result.cost`` is non-zero for the model and
     USD ``budget(...)`` caps enforce against it. This SDK helper is the supported entry point for
-    Python — there is **no** ``cendor.core.prices.register`` to call directly; it writes straight
-    into ``cendor-core``'s in-memory price table.
+    Python — there is **no** ``cendor.core.prices.register`` to call directly; it writes through
+    core's contractual ``prices._register`` hook, so the registration **survives**
+    ``prices.refresh()`` (core ≥ 1.6).
 
     ```python
     from cendor.sdk import Agent, run, budget
@@ -70,6 +70,5 @@ def register_model_price(
         rates["cached"] = Decimal(str(cached)) / divisor
     if cache_write is not None:
         rates["cache_write"] = Decimal(str(cache_write)) / divisor
-    table: dict[str, Any] = _prices._ensure_loaded().setdefault("models", {})
-    table[model] = rates
+    _prices._register(model, rates)  # the contractual write hook — survives prices.refresh()
     return rates

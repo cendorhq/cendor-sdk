@@ -40,8 +40,12 @@ await run(agent, "What's the refund window?");  // passages retrieved + injected
 
 ### Governed embeddings — `embed`
 
-`embed(model, inputs)` / `aembed(...)` return one vector per input and emit a governed `LLMCall`
-— tokens and cost captured on the bus, correlated by `trace` — for OpenAI-family providers:
+`embed(model, inputs)` / `aembed(...)` return one vector per input and ride the **instrumented**
+client, so core captures a governed `LLMCall` (`metadata["embedding"] = True`) — tokens and cost
+on the bus, correlated by `trace`, and (since 1.7.0 / 0.10.0, on core ≥ 1.6) the **pre-flight
+pass applies**: a `budget(usd=…, on_exceed="block")` refuses an over-budget embed before it
+fires, and a `guard(...)` can redact the text before the provider sees it. OpenAI-family
+providers:
 
 <!-- tabs: lang -->
 <!-- tab: Python -->

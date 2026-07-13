@@ -34,6 +34,10 @@ class EvalCase:
     #: just another callable). Replay stays deterministic — a judge that itself calls a model should
     #: be wrapped in its own cassette.
     judge: Callable[[Any, EvalCase], bool | tuple[bool, str]] | None = None
+    #: Forwarded to ``cassette.using(path, mode="replay", normalizer=…)`` — normalize volatile
+    #: request parts (timestamps, uuids) before matching, so a prompt that embeds "today's date"
+    #: still replays. Same signature as cassette's: ``normalizer(call) -> dict``.
+    normalizer: Callable[[Any], dict] | None = None
 
 
 @dataclass
@@ -89,7 +93,7 @@ class EvalReport:
 def _evaluate_one(agent: Agent, case: EvalCase) -> EvalResult:
     from cendor import cassette
 
-    with cassette.using(case.cassette, mode="replay"):
+    with cassette.using(case.cassette, mode="replay", normalizer=case.normalizer):
         result = run(agent, case.input)
 
     tools = [s.name for s in result.tool_steps]

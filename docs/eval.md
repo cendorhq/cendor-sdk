@@ -97,6 +97,11 @@ Each `EvalResult` records the actual `output`, `cost_usd`, `tokens`, and `tools`
 | A change makes a run more expensive | `max_usd` | `cost $X > $ceiling (regression)` |
 | A change inflates token usage | `max_tokens` | `tokens N > ceiling (regression)` |
 
+**Volatile prompts replay too** (since 1.7.0 / 0.10.0): `EvalCase(normalizer=…)` /
+`{ normalizer }` is forwarded to cassette's replay matching — normalize timestamps, uuids, or
+"today's date" out of the request before hashing, so a prompt that embeds them still matches its
+recording. Same signature as [cassette's own `normalizer`](/docs/cassette#core-concepts).
+
 ### A CI test
 
 <!-- tabs: lang -->

@@ -129,6 +129,19 @@ def _inject_retrieved_context(agent: Agent, messages: list[dict]) -> None:
         messages.insert(idx, {"role": "system", "content": format_context(chunks)})
 
 
+class ContextBudgetFallback:
+    """Diagnostic bus event: ``context_budget`` assembly failed and the turn fell back to raw
+    messages. Emitted on ``cendor-core``'s bus so the deliberate best-effort fallback is *silent
+    but observable* — subscribe and alert on it if a fallback matters to you. Unknown event types
+    are ignored by the stock subscribers (bus-events spec), so emitting this is side-effect-free.
+    """
+
+    def __init__(self, agent: str, budget_tokens: int, error: str) -> None:
+        self.agent = agent
+        self.budget_tokens = budget_tokens
+        self.error = error
+
+
 def _assemble(agent: Agent, messages: list[dict]) -> list[dict]:
     """Optional context assembly to a token budget via contextkit (emits an audited AssemblyReport).
     Falls back to the raw messages if unset or if assembly can't handle the shape."""
@@ -144,7 +157,17 @@ def _assemble(agent: Agent, messages: list[dict]) -> list[dict]:
         )
         ctx.add(Block(messages=messages))
         return ctx.assemble()
-    except Exception:  # noqa: BLE001 - assembly is best-effort; degrade to raw messages
+    except Exception as exc:  # noqa: BLE001 - assembly is best-effort; degrade to raw messages
+        try:  # make the silent fallback observable on the bus (never let the emit itself break it)
+            bus.emit(
+                ContextBudgetFallback(
+                    agent=agent.name,
+                    budget_tokens=int(agent.context_budget),
+                    error=type(exc).__name__,
+                )
+            )
+        except Exception:  # noqa: BLE001, S110 - diagnostics must never break the run
+            pass
         return messages
 
 

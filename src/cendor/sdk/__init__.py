@@ -27,21 +27,27 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 
 # --- audit + redaction (cendor-acttrace, re-exported) -------------------------------------------
-from cendor.acttrace import AuditLog, Policy, verify
+# `guard` is the IDENTICAL acttrace object (since cendor-acttrace 1.5.0 its return is dual-shape:
+# a plain interceptor that is also a context manager) — `cendor.sdk.guard is cendor.acttrace.guard`.
+from cendor.acttrace import AuditLog, Policy, PolicyViolation, guard, verify
 
-# --- correlation (cendor-core) ------------------------------------------------------------------
-from cendor.core import current_trace_id, trace
+# --- correlation + event types (cendor-core) ----------------------------------------------------
+# `LLMCall`/`ToolCall`/`Usage`/`Money` are re-exported for isinstance checks and typing over
+# `Result.steps[].call` (TS parity — @cendor/sdk has exported them since 0.4).
+from cendor.core import LLMCall, Money, ToolCall, Usage, current_trace_id, trace
 
 # --- guardrails gate (cendor-guardrails, re-exported) -------------------------------------------
 # `Guardrail`/`guardrail`/`GuardrailTripped`/`judge`/`rules` are the one-import convenience for
-# Agent(guardrails=[…]). NOTE: `guard` below stays the acttrace-policy context manager — the two
-# are distinct, and `evaluate` here is the SDK's eval harness, not guardrails.evaluate.
+# Agent(guardrails=[…]). NOTE: `evaluate` here is the SDK's eval harness, not guardrails.evaluate.
 # `rules` is the SDK's own superset module (`.rules`): the deterministic cendor.guardrails rules
 # PLUS `pii`/`secrets`/`entropy` bridged from acttrace's catalogue (SDK may import libs).
+# `GuardrailDecision`/`Verdict` are re-exported for typing over `Result.guardrail_decisions`.
 from cendor.guardrails import (
     Guardrail,
+    GuardrailDecision,
     GuardrailTripped,
     LoadedPolicy,
+    Verdict,
     guardrail,
     judge,
     load_policy,
@@ -51,10 +57,18 @@ from cendor.guardrails import (
 from cendor.guardrails.judge import task_adherence
 
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
-from cendor.tokenguard import BudgetExceeded, budget, configure, report, track
+# `downgrades()`/`clamps()` expose what a pre-flight `on_exceed="downgrade"`/token clamp rerouted.
+from cendor.tokenguard import (
+    BudgetExceeded,
+    budget,
+    clamps,
+    configure,
+    downgrades,
+    report,
+    track,
+)
 
 from . import rules
-from ._governance import guard
 
 # --- the SDK -----------------------------------------------------------------------------------
 from .a2a import A2AClient, A2AServer
@@ -161,15 +175,19 @@ __all__ = [
     "ToolCallEvent",
     "ToolResultEvent",
     "RunComplete",
-    # governance (tokenguard/acttrace, re-exported; `guard` is the scope form of acttrace's
-    # enforcement, `register_model_price` is SDK-owned)
+    # governance (the identical tokenguard/acttrace objects, re-exported — incl. `guard`, whose
+    # dual-shape return since acttrace 1.5.0 makes the scope form a library feature;
+    # `register_model_price` is SDK-owned)
     "budget",
     "track",
     "report",
     "configure",
+    "downgrades",
+    "clamps",
     "register_model_price",
     "BudgetExceeded",
     "guard",
+    "PolicyViolation",
     "Policy",
     "AuditLog",
     "verify",
@@ -178,6 +196,8 @@ __all__ = [
     "Guardrail",
     "guardrail",
     "GuardrailTripped",
+    "GuardrailDecision",
+    "Verdict",
     "judge",
     "task_adherence",
     "load_policy",
@@ -185,8 +205,12 @@ __all__ = [
     "policy_schema",
     "presets",
     "rules",
-    # correlation
+    # correlation + event types (cendor-core, re-exported)
     "trace",
     "current_trace_id",
+    "LLMCall",
+    "ToolCall",
+    "Usage",
+    "Money",
     "__version__",
 ]

@@ -13,6 +13,9 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from cendor.acttrace import PolicyViolation
+from cendor.tokenguard import BudgetExceeded
+
 _TRANSIENT_NAME_HINTS = (
     "timeout",
     "connection",
@@ -25,24 +28,27 @@ _TRANSIENT_NAME_HINTS = (
     "temporarilyunavailable",
 )
 _TRANSIENT_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
-_NEVER_RETRY = {"budgetexceeded", "policyviolation"}
+#: Governance decisions are terminal — matched by ``isinstance`` on the real library classes (a
+#: name-string match would silently turn never-retry into retry if a lib renamed its exception).
+_NEVER_RETRY: tuple[type[BaseException], ...] = (BudgetExceeded, PolicyViolation)
 
 
 def default_is_transient(exc: BaseException) -> bool:
     """Heuristic: is ``exc`` a transient provider error worth retrying?
 
-    Governance exceptions (``BudgetExceeded``/``PolicyViolation``) are never transient. Otherwise a
-    call is retried if it carries a retryable HTTP status or its type name looks transient — using
-    duck typing so no provider SDK needs importing.
+    Governance exceptions (``BudgetExceeded``/``PolicyViolation``) are never transient — checked by
+    ``isinstance`` on the real library classes. Otherwise a call is retried if it carries a
+    retryable HTTP status or its type name looks transient — the name heuristic applies **only** to
+    transient hints, using duck typing so no provider SDK needs importing.
     """
-    name = type(exc).__name__.lower()
-    if name in _NEVER_RETRY:
+    if isinstance(exc, _NEVER_RETRY):
         return False
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(exc, "status", None)
     if isinstance(status, int) and status in _TRANSIENT_STATUS:
         return True
+    name = type(exc).__name__.lower()
     return any(hint in name for hint in _TRANSIENT_NAME_HINTS)
 
 
