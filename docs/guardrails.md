@@ -299,9 +299,7 @@ agent = Agent(
 <!-- tab: TypeScript -->
 
 ```ts
-// spotlight is Python-first in @cendor/sdk's `rules`; until that re-export ships, import it from the library.
-import { Agent } from '@cendor/sdk';
-import { rules } from '@cendor/guardrails';
+import { Agent, rules } from '@cendor/sdk'; // spotlight rides the SDK rules namespace since 0.10.0
 
 const agent = new Agent({
   name: 'rag', model: 'gpt-4o', instructions: 'Answer from the retrieved passages only.',
@@ -492,12 +490,9 @@ agent = Agent(
 
 <!-- tab: TypeScript -->
 
-<!-- ts-check: skip -->
-
 ```ts
-// The library rails/config-as-data ship in @cendor/guardrails; the SDK re-export rides the next
-// @cendor/sdk release. Until then, import them from @cendor/guardrails and pass to Agent({ guardrails }).
-import { rules, loadPolicy } from '@cendor/guardrails';
+// The hosted rails + config-as-data ride the SDK surface since 0.10.0 — one import.
+import { rules, loadPolicy } from '@cendor/sdk';
 ```
 
 <!-- /tabs -->
