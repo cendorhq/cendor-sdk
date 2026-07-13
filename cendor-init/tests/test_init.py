@@ -77,6 +77,7 @@ def test_scaffold_python(tmp_path: Path):
     body = _read(tmp_path, "cendor_quickstart.py")
     assert "from cendor.core import instrument" in body
     assert '@budget(usd=0.50, on_exceed="raise")' in body
+    assert "Auth:     OPENAI_API_KEY from your env" in body
 
 
 def test_scaffold_node(tmp_path: Path):
@@ -85,6 +86,7 @@ def test_scaffold_node(tmp_path: Path):
     body = _read(tmp_path, "cendor-quickstart.mjs")
     assert "budget({ usd: 0.5" in body
     assert "instrument(new OpenAI())" in body
+    assert "Auth:     OPENAI_API_KEY from your env" in body
 
 
 def test_scaffold_python_sdk(tmp_path: Path):
@@ -97,6 +99,7 @@ def test_scaffold_python_sdk(tmp_path: Path):
     assert "from cendor.sdk import Agent" in body
     assert "max_usd=0.50" in body
     assert "guard(Policy.default()" in body
+    assert "Auth:     OPENAI_API_KEY from your env, or Agent(api_key=...)" in body
     assert "from cendor.core import instrument" not in body
 
 
@@ -111,4 +114,5 @@ def test_scaffold_node_sdk(tmp_path: Path):
     assert "new Agent(" in body
     assert "withBudget(" in body
     assert "rules.keywordDeny" in body
+    assert "OPENAI_API_KEY from your env, or apiKey on the Agent" in body
     assert "instrument(new OpenAI())" not in body

@@ -135,6 +135,7 @@ def _mcp_config_files() -> list[tuple[str, str]]:
 _PY_SCAFFOLD = '''"""Minimal Cendor starter — instrument once, then cap spend. Offline-safe scaffold.
 
 Install:  pip install cendor-tokenguard "cendor-sdk[openai]"   (or just what you call)
+Auth:     OPENAI_API_KEY from your env (OpenAI() reads it) — no Cendor key needed
 Docs:     https://cendor.ai/docs/getting-started
 """
 
@@ -167,6 +168,7 @@ if __name__ == "__main__":
 _NODE_SCAFFOLD = """// Minimal Cendor starter — instrument once, then cap spend. Offline-safe scaffold.
 //
 // Install:  npm i @cendor/core @cendor/tokenguard openai   (or just what you call)
+// Auth:     OPENAI_API_KEY from your env (new OpenAI() reads it) — no Cendor key needed
 // Docs:     https://cendor.ai/docs/getting-started
 import { instrument } from '@cendor/core';
 import { budget, track, report } from '@cendor/tokenguard';
@@ -193,6 +195,7 @@ console.log(report(['feature'])); // spend grouped by tag — for free
 _PY_SDK_SCAFFOLD = '''"""Minimal governed-agent starter (cendor-sdk). Offline-safe scaffold.
 
 Install:  pip install "cendor-sdk[openai]"
+Auth:     OPENAI_API_KEY from your env, or Agent(api_key=...) — no Cendor key needed
 Docs:     https://cendor.ai/docs/sdk/getting-started
 """
 
@@ -223,6 +226,7 @@ if __name__ == "__main__":
 _NODE_SDK_SCAFFOLD = """// Minimal governed-agent starter (@cendor/sdk). Offline-safe scaffold.
 //
 // Install:  npm i @cendor/sdk openai
+// Auth:     OPENAI_API_KEY from your env, or apiKey on the Agent — no Cendor key needed
 // Docs:     https://cendor.ai/docs/sdk/getting-started
 import { Agent, run, withBudget, guard, rules, Policy, AuditLog } from '@cendor/sdk';
 

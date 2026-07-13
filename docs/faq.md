@@ -64,6 +64,15 @@ call) for open-ended risk. For PII/secrets, `rules.pii()` / `rules.secrets()` / 
 bridge `acttrace`'s detector catalogue as guardrails at all four stages (including `tool_output`);
 `guard(Policy…)` remains the process-global option.
 
+## Where do I put my API key?
+
+You don't configure a Cendor key — the SDK builds the provider client for you, so you use the
+**provider's own** credential. Set its standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`GOOGLE_API_KEY`, the AWS credential chain for Bedrock, …), or pass `Agent(api_key=…)` /
+`new Agent({ apiKey: … })`, or hand over a pre-built `client=`. The SDK doesn't read `.env` files —
+load them yourself. Full table and per-provider notes:
+[API keys & credentials](providers.md#api-keys--credentials).
+
 ## How do I test an agent without an API key?
 
 Record once, replay forever: wrap the run in

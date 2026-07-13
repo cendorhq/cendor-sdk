@@ -80,7 +80,16 @@ class Agent:
             is checked). A block then raises *earlier* in the stream — but deltas already yielded
             can't be unshown, so this narrows the window, it doesn't close it (redact mid-stream is
             not applied). Single-agent ``run.stream`` only. See docs/guardrails.md "Streaming".
-        api_key / base_url / client: Optional client config, or an explicit instrumented client.
+        api_key / base_url / client: Provider credentials and endpoint. There is **no Cendor key
+            config** — the SDK builds the provider client for you. Keys resolve: explicit
+            ``api_key`` → the provider's standard env var (``OPENAI_API_KEY``,
+            ``ANTHROPIC_API_KEY``, ``GOOGLE_API_KEY``, the AWS credential chain for Bedrock,
+            ``HF_TOKEN``, the ``AZURE_*`` vars, …) → a keyless placeholder so offline flows
+            (cassette replay, pre-flight budget blocks) work — a *live* call then fails with the
+            provider's own 401. ``base_url`` targets a gateway / self-hosted endpoint; ``client``
+            hands over a pre-built SDK client (instrumented on adoption, so budgets/guard/audit
+            still apply). The SDK does not read ``.env`` files. See docs/providers.md
+            "API keys & credentials".
     """
 
     name: str

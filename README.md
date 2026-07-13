@@ -53,6 +53,10 @@ SDKs stay optional extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`, `
 
 ## A governed agent in 10 lines
 
+**Auth:** `OPENAI_API_KEY` from your environment (or `Agent(api_key=…)`, or a pre-built
+`client=`). The SDK builds the provider client for you — there's no Cendor-specific key. Full
+table: [docs/providers](docs/providers.md#api-keys--credentials).
+
 ```python
 from cendor.sdk import Agent, tool, run, budget, guard, Policy, AuditLog
 

@@ -56,7 +56,10 @@ console.log(result.output, result.cost?.toString());  // the answer + decimal mo
 
 The per-agent cost cap is **`max_usd`/`maxUsd`**, not a `budget=` field; the SQLite session store
 casing differs (`SQLiteSessionStore` in Python, `SqliteSessionStore` in TS); `cassette` is imported
-from the umbrella (`from cendor import cassette`), not the SDK. Full guide: <https://cendor.ai/docs/sdk>.
+from the umbrella (`from cendor import cassette`), not the SDK. **Auth:** the SDK builds the provider
+client, so use the provider's standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) or
+`Agent(api_key=…)` / a pre-built `client=` — nothing Cendor-specific. Full guide:
+<https://cendor.ai/docs/sdk>.
 
 ## The three traps most likely to bite
 

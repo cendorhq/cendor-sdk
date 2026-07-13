@@ -20,6 +20,10 @@ governance don't change.
 | Azure AI Foundry (Responses) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
 | Foundry Local (on-device) | `[foundry-local]` | ✅ (OpenAI-shape) | ✅ functions |
 
+**Auth for every path:** see [API keys & credentials](#api-keys--credentials) — the SDK reads
+the provider's standard env var (or takes `api_key=` / a pre-built `client=`); there is no
+Cendor-specific key setting.
+
 Normalization is isolated in `providers.py` (Python) / `providers.ts` (TypeScript) with
 per-provider fixtures, so response-shape drift is contained. **All ten paths ship in `@cendor/sdk`**
 behind the same `Provider` seam — Hugging Face, Ollama, Gemini, and Bedrock drive the model with
@@ -31,6 +35,129 @@ Face. Google Gemini and AWS Bedrock have no native async client in their SDKs, s
 them synchronously for now — correct results, but without a concurrency benefit.
 
 ## Core concepts
+
+### API keys & credentials
+
+The SDK builds the provider client for you, so there is **no Cendor key config**. Credentials
+resolve in this order — the same in both languages:
+
+1. **Explicit:** `Agent(api_key=…)` (Python) / `new Agent({ apiKey: … })` (TypeScript).
+2. **The provider's standard env var** — the same variable the provider's own SDK reads:
+
+| Provider | Key | Endpoint / region |
+|---|---|---|
+| OpenAI | `OPENAI_API_KEY` | `base_url=` for gateways |
+| Anthropic | `ANTHROPIC_API_KEY` | — |
+| Google Gemini | `GOOGLE_API_KEY` | — |
+| AWS Bedrock | AWS credential chain (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, profile, or IAM role) — no API key | `AWS_REGION` |
+| Ollama | none — local | `OLLAMA_HOST` |
+| Hugging Face | `HF_TOKEN` (or `HUGGINGFACEHUB_API_TOKEN`) | — |
+| Azure AI Foundry | `AZURE_OPENAI_API_KEY` / `AZURE_INFERENCE_CREDENTIAL` / `AZURE_AI_API_KEY` | `AZURE_OPENAI_ENDPOINT` |
+| Foundry Local | none (`FOUNDRY_LOCAL_API_KEY` optional) | `FOUNDRY_LOCAL_ENDPOINT` |
+
+3. **Bring your own client:** `Agent(client=…)` — you construct the provider SDK client yourself
+   (with whatever auth it supports); Cendor instruments it on adoption, so budgets, guardrails,
+   and audit still apply.
+
+The SDK never reads `.env` files — load them yourself (`python-dotenv`, `node --env-file=.env`).
+If no key is found, the client is still constructed with a placeholder so **keyless flows work**
+(cassette replay, pre-flight budget blocks) — a live call then fails with the provider's own
+authentication error. If you see a 401 mentioning `cendor-sdk-placeholder`, set the env var above
+or pass `api_key=`.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent
+
+# 1) Recommended — the standard env var; nothing to pass:
+#      export OPENAI_API_KEY="sk-..."           # bash
+#      $env:OPENAI_API_KEY = "sk-..."           # PowerShell
+agent = Agent(name="a", model="gpt-4o")
+
+# 2) Explicit — e.g. keys from a secret manager (never surfaced in repr/logs):
+agent = Agent(name="a", model="gpt-4o", api_key=read_secret("openai"))
+
+# 3) Bring your own client — full control over auth, still governed:
+from openai import OpenAI
+agent = Agent(name="a", model="gpt-4o", client=OpenAI(api_key=read_secret("openai")))
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent } from '@cendor/sdk';
+import OpenAI from 'openai';
+
+// 1) Recommended — the standard env var (process.env.OPENAI_API_KEY); nothing to pass:
+const a = new Agent({ name: 'a', model: 'gpt-4o' });
+
+// 2) Explicit — e.g. keys from a secret manager:
+const b = new Agent({ name: 'a', model: 'gpt-4o', apiKey: readSecret('openai') });
+
+// 3) Bring your own client — full control over auth, still governed:
+const c = new Agent({ name: 'a', model: 'gpt-4o', client: new OpenAI({ apiKey: readSecret('openai') }) });
+```
+
+<!-- /tabs -->
+
+Per-provider notes:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+# Anthropic — ANTHROPIC_API_KEY, or api_key=
+claude = Agent(name="c", model="claude-sonnet-5", api_key="sk-ant-...")
+
+# Google Gemini — GOOGLE_API_KEY, or api_key=
+gem = Agent(name="g", model="gemini-2.5-flash")
+
+# AWS Bedrock — NO api_key: standard AWS credentials + AWS_REGION
+#   export AWS_ACCESS_KEY_ID=... AWS_SECRET_ACCESS_KEY=... AWS_REGION=us-east-1
+br = Agent(name="b", model="anthropic.claude-sonnet-4-5-20250929-v1:0", provider="bedrock")
+
+# Ollama — local, no key; remote host via OLLAMA_HOST
+llama = Agent(name="l", model="llama3.2")
+
+# Hugging Face — HF_TOKEN, or api_key=; always provider="huggingface"
+hf = Agent(name="h", model="meta-llama/Llama-3.3-70B-Instruct", provider="huggingface")
+
+# Azure AI Foundry — resource key + endpoint; always provider="azure"
+az = Agent(name="z", model="my-gpt4o-deployment", provider="azure",
+           api_key="<resource-key>", base_url="https://my-res.openai.azure.com")
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+// Anthropic — ANTHROPIC_API_KEY, or apiKey:
+const claude = new Agent({ name: 'c', model: 'claude-sonnet-5', apiKey: 'sk-ant-...' });
+
+// Google Gemini — GOOGLE_API_KEY, or apiKey:
+const gem = new Agent({ name: 'g', model: 'gemini-2.5-flash' });
+
+// AWS Bedrock — NO apiKey: standard AWS credentials + AWS_REGION
+const br = new Agent({ name: 'b', model: 'anthropic.claude-sonnet-4-5-20250929-v1:0', provider: 'bedrock' });
+
+// Ollama — local, no key; remote host via baseURL
+const llama = new Agent({ name: 'l', model: 'llama3.2' });
+
+// Hugging Face — HF_TOKEN, or apiKey; always provider: 'huggingface'
+const hf = new Agent({ name: 'h', model: 'meta-llama/Llama-3.3-70B-Instruct', provider: 'huggingface' });
+
+// Azure AI Foundry — resource key + endpoint; always provider: 'azure'
+const az = new Agent({ name: 'z', model: 'my-gpt4o-deployment', provider: 'azure',
+                       apiKey: '<resource-key>', baseURL: 'https://my-res.openai.azure.com' });
+```
+
+<!-- /tabs -->
+
+The same `api_key` / `provider` / `base_url` options work on [`llm_summarizer`](memory.md),
+[`embed`](rag.md), and the RAG retriever. Azure **keyless** (Entra ID) auth: see
+[Azure AI Foundry](#azure-ai-foundry). Testing **without** any key: see
+[Eval & regression testing](eval.md) — cassette replay needs no credentials.
 
 ### Provider inference — and when to be explicit
 
@@ -180,7 +307,7 @@ agent = Agent(
     model="my-gpt4o-deployment",       # your Foundry DEPLOYMENT name
     provider="azure",
     base_url="https://my-resource.openai.azure.com",   # or AZURE_OPENAI_ENDPOINT
-    api_key="<resource-key>",          # or AZURE_OPENAI_API_KEY / AZURE_INFERENCE_CREDENTIAL
+    api_key="<resource-key>",          # or AZURE_OPENAI_API_KEY / AZURE_INFERENCE_CREDENTIAL / AZURE_AI_API_KEY
 )
 
 with budget(usd=0.10, on_exceed="block"):
@@ -199,7 +326,7 @@ const agent = new Agent({
   model: 'my-gpt4o-deployment',       // your Foundry DEPLOYMENT name
   provider: 'azure',
   baseURL: 'https://my-resource.openai.azure.com',   // or AZURE_OPENAI_ENDPOINT
-  apiKey: '<resource-key>',           // or AZURE_OPENAI_API_KEY / AZURE_INFERENCE_CREDENTIAL
+  apiKey: '<resource-key>',           // or AZURE_OPENAI_API_KEY / AZURE_INFERENCE_CREDENTIAL / AZURE_AI_API_KEY
 });
 
 const result = await withBudget({ usd: 0.10, onExceed: 'block' }, () =>
@@ -296,6 +423,21 @@ const result = await run(agent, 'Give me one tip for faster cold starts.');
 
 Already running the service yourself? Just pass `base_url=` (or `FOUNDRY_LOCAL_ENDPOINT`) and
 skip the manager.
+
+## Gemini, Bedrock & Ollama
+
+These three are prefix-inferable (`gemini-*` → Google, dotted `provider.model` ids → Bedrock,
+everything else → Ollama when `provider="ollama"`), so a plain model id is usually enough. Auth
+follows the [resolution order above](#api-keys--credentials); the per-provider specifics:
+
+- **Google Gemini** — `GOOGLE_API_KEY` (or `api_key=` / `apiKey`). No native async client, so
+  `run.aio` runs it synchronously (correct results, no concurrency win).
+- **AWS Bedrock** — **no API key.** Authentication is the standard AWS credential chain
+  (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, an `AWS_PROFILE`, or an
+  IAM role) plus a region (`AWS_REGION` / `AWS_DEFAULT_REGION`). Bedrock ids are dotted
+  (`anthropic.claude-…`), so keep `provider="bedrock"` explicit. Like Gemini, no native async.
+- **Ollama** — local, no key. A remote daemon is reached via `OLLAMA_HOST` (the ollama SDK's own
+  env var) or `base_url=` / `baseURL`.
 
 ## Provider-author reference
 

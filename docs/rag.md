@@ -177,7 +177,7 @@ beside it:
 
 - **↔ [contextkit](/docs/contextkit)** (+ [squeeze](/docs/squeeze)) — with `context_budget` set,
   passages are assembled into the token window alongside the conversation, oversized ones compressed
-  reversibly. This is the assembly layer the [feature map](getting-started.md#5-where-each-concept-lives)
+  reversibly. This is the assembly layer the [feature map](getting-started.md#6-where-each-concept-lives)
   routes RAG to.
 - **↔ [cendor-core](/docs/core)** — every `embed()` is a governed `LLMCall` on the bus, correlated
   by `trace`, so an index build isn't an invisible bill.

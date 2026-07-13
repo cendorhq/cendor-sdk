@@ -88,6 +88,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
         out(f"  {ln}\n")
 
     out("\nNext:\n")
+    out("  • Set your provider key (e.g. OPENAI_API_KEY) in the env, or pass Agent(api_key=…).\n")
     out("  • Trust your editor's hover/completion — every Cendor symbol ships an @example.\n")
     out("  • Full trap sheet:  https://cendor.ai/docs/for-ai-assistants\n")
     out("  • Validate wiring:  uvx cendor-init doctor\n\n")

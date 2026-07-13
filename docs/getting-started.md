@@ -1,7 +1,7 @@
 # Getting started
 
 Install the SDK, run one governed agent, and learn where each concept lives. Ten minutes,
-one API key (or none — the [ungoverned example](#3-run-it-ungoverned--core-only) works offline
+one API key (or none — the [ungoverned example](#4-run-it-ungoverned--core-only) works offline
 with a recorded cassette).
 
 **Using an AI coding assistant?** Cendor's types teach the correct call-shape inline (on hover and
@@ -41,7 +41,28 @@ you call. ESM-only; Node LTS first, edge runtimes supported. Everything imports 
 
 <!-- /tabs -->
 
-## 2. A governed agent in 10 lines
+## 2. Bring one env var
+
+The SDK builds the provider client for you — so you don't set a *Cendor* key, you set the
+**provider's own** env var. For OpenAI (used in the quickstart below) that's `OPENAI_API_KEY`:
+
+```bash
+export OPENAI_API_KEY="sk-..."         # macOS / Linux
+```
+
+```powershell
+$env:OPENAI_API_KEY = "sk-..."         # Windows PowerShell
+```
+
+Prefer to pass it in code? Use `Agent(api_key=…)` / `new Agent({ apiKey: … })`, or hand over a
+pre-built client with `Agent(client=…)`. Every other provider reads its own standard variable
+(`ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, the AWS credential chain for Bedrock, …) — the full table is
+in [API keys & credentials](providers.md#api-keys--credentials). The SDK doesn't read `.env` files;
+load them yourself. **No key yet?** The [ungoverned](#4-run-it-ungoverned--core-only) and
+[testable](#5-make-it-testable) examples below run offline from a recorded cassette — no credentials
+needed.
+
+## 3. A governed agent in 10 lines
 
 One agent, one tool, and all four governance layers — budget cap, PII guard, audit chain, and a
 cost/usage receipt:
@@ -113,7 +134,7 @@ Not shown here but one argument away: `Agent(context_budget=…)` fits history t
 [contextkit](/docs/contextkit)/[squeeze](/docs/squeeze), and `Agent(guardrails=[…])` gates the loop
 with [cendor-guardrails](/docs/guardrails).
 
-## 3. Run it ungoverned — core only
+## 4. Run it ungoverned — core only
 
 Every governance layer is optional. Drop the wrappers and it's a bare loop on `cendor-core`:
 
@@ -139,7 +160,7 @@ const result = await run(agent, 'Hello');   // TS is async throughout
 
 <!-- /tabs -->
 
-## 4. Make it testable
+## 5. Make it testable
 
 Record the run once; replay it offline forever — deterministic, no network, no keys. Cost and
 tokens are **real on replay**, so tests can assert spend too:
@@ -168,7 +189,7 @@ const result = await using('tests/fixtures/run.json', () =>   // records once, r
 This is the foundation of the [eval harness](eval.md), which turns recorded trajectories into CI
 regression tests.
 
-## 5. Where each concept lives
+## 6. Where each concept lives
 
 | I want to… | Go to | Library underneath |
 |---|---|---|

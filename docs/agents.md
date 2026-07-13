@@ -93,9 +93,12 @@ The provider is inferred from the model id (`gpt-*`/`o*` → OpenAI, `claude-*` 
 aren't prefix-inferable, so those always take an explicit `provider=` — see
 [Providers](providers.md).
 
-`api_key` / `base_url` / `client` are also accepted: `api_key` falls back to the provider's env
-var, `base_url` targets a gateway or self-hosted endpoint, and `client` hands over a pre-built SDK
-client (instrumented on adoption, so budgets/guard/audit still apply). `Agent(cache=True)` marks
+`api_key` / `base_url` / `client` are also accepted: keys resolve **explicit `api_key=` → the
+provider's standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, the AWS
+credential chain for Bedrock, …) → a keyless placeholder** (so offline flows work; a live call then
+401s). `base_url` targets a gateway or self-hosted endpoint, and `client` hands over a pre-built SDK
+client (instrumented on adoption, so budgets/guard/audit still apply). The full matrix is in
+[API keys & credentials](providers.md#api-keys--credentials). `Agent(cache=True)` marks
 the stable prefix (system prompt + tools) for provider prompt caching — Anthropic `cache_control`
 today, a no-op elsewhere — and cached tokens price through to `Result.cost` automatically.
 

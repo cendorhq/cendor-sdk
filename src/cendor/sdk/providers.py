@@ -18,6 +18,14 @@ consume Foundry deployments with the **standard** ``openai`` SDK pointed at the 
 endpoint — the ``AzureOpenAI`` client and the ``azure-ai-inference`` package are being retired — so
 "connect to Foundry" is just the OpenAI provider with a Foundry ``base_url`` and the *deployment
 name* as the model id.
+
+**Credentials.** Client construction takes no Cendor-specific key. A key resolves: explicit
+``Agent(api_key=…)`` → the provider's standard env var (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
+``GOOGLE_API_KEY``; the AWS credential chain + ``AWS_REGION`` for Bedrock; ``HF_TOKEN`` for Hugging
+Face; ``AZURE_OPENAI_API_KEY`` / ``AZURE_INFERENCE_CREDENTIAL`` / ``AZURE_AI_API_KEY`` for Azure) →
+a **placeholder** (``sk-cendor-sdk-placeholder`` and per-provider variants) so keyless offline
+flows work; a live call then raises the provider's own auth error. ``base_url`` overrides the
+endpoint. See docs/providers.md "API keys & credentials" for the full matrix.
 """
 
 from __future__ import annotations
