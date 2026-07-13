@@ -2,8 +2,9 @@
 
 Cap what a run may spend, attribute every cent, keep tamper-evident evidence, and redact PII
 before it leaves the process — each one is a single wrapper around `run()`. Everything on this
-page is the **real** [tokenguard](/docs/tokenguard) / [acttrace](/docs/acttrace) API, re-exported
-from `cendor.sdk` for one-import convenience; it all rides
+page is the **real** [tokenguard](/docs/tokenguard) / [acttrace](/docs/acttrace) API — the objects
+re-exported from `cendor.sdk` for one-import convenience, with `guard` as acttrace's policy
+enforcement in the SDK's scope form; it all rides
 [`cendor-core`](/docs/core)'s seams, so it applies to any instrumented call, not just SDK runs.
 
 ## Quickstart

@@ -50,9 +50,11 @@ stand on.
 
 Two libraries act on *both* sides of a call — **guardrails** gates the input and the output,
 **acttrace** guards (redacts) before send and audits after. Everything ships under the `cendor.*`
-(Python) / `@cendor/*` (TypeScript) namespace; the SDK re-exports the objects you reach for, so
-`from cendor.sdk import budget` is the *same* `budget` as `from cendor.tokenguard import budget` —
-drop down to the libraries at any time, it's continuous, never a migration.
+(Python) / `@cendor/*` (TypeScript) namespace; the SDK re-exports the governance objects you reach
+for, so `from cendor.sdk import budget` is the *same* `budget` as
+`from cendor.tokenguard import budget` — the per-library tables below say exactly what is an
+identical re-export, what is SDK-owned, and where a thin wrapper sits in between. Drop down to the
+libraries at any time, it's continuous, never a migration.
 
 ## Where each library is used in the SDK
 
@@ -78,16 +80,18 @@ Full library docs: [/docs/contextkit](/docs/contextkit).
 ### squeeze — compress oversized blocks <span style="color:#22C55E">●</span>
 
 **squeeze has no direct SDK API — and that's deliberate.** It is a hard dependency, but you never
-call it from `cendor.sdk`. At import it registers a `Compressor` on
-[`cendor-core`](/docs/core)'s protocol seam; contextkit picks it up whenever a block is marked
-`evict="compress"`, and session trimming benefits the same way. **Install it and it engages;**
-without it present, `evict="compress"` falls back to truncation.
+call it from `cendor.sdk` — and the SDK loop itself never reaches it today: `context_budget` packs
+history as a messages block, which contextkit trims by peeling the oldest turns, never by
+compression. squeeze engages when you drop down to the libraries: it satisfies
+[`cendor-core`](/docs/core)'s `Compressor` protocol by shape (there is no registration step —
+nothing happens at import), and [contextkit](/docs/contextkit) discovers it lazily the moment one
+of *your* blocks is marked `evict="compress"`; `compress()` is also always callable directly.
+Without squeeze installed, `evict="compress"` falls back to truncation.
 
 | SDK surface | What squeeze does there | Concept page |
 |---|---|---|
-| *no direct symbol* | auto-wires as a `Compressor` on core's seam at import | (this section) |
-| `Agent(context_budget=…)` + `evict="compress"` blocks | contextkit calls squeeze to shrink oversized blocks reversibly | [Memory & sessions](memory.md#fitting-memory-to-the-window--context_budget) |
-| session trimming | the same compression path keeps long memory bounded | [Memory & sessions](memory.md) |
+| *no direct symbol* | satisfies core's `Compressor` protocol; contextkit discovers it lazily at eviction time | (this section) |
+| *(none — direct library use)* | mark your own contextkit `Block(…, evict="compress")` or call `compress()` directly; the SDK loop's history block never takes the compress path | [/docs/contextkit](/docs/contextkit) · [/docs/squeeze](/docs/squeeze) |
 
 Full library docs: [/docs/squeeze](/docs/squeeze).
 

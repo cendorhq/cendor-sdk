@@ -73,8 +73,9 @@ bills.
 
 A `retriever` is any `query -> list[str]` callable. Before each model call, retrieved passages
 are injected as a system message — and when `Agent(context_budget=…)` is set, they're packed into
-the window by [contextkit](/docs/contextkit) alongside the conversation, with
-[squeeze](/docs/squeeze) compressing oversized passages when it's installed. So retrieval feeds the
+the window by [contextkit](/docs/contextkit) alongside the conversation ([squeeze](/docs/squeeze)
+compression engages only when you assemble with contextkit directly — the SDK's packing path trims
+rather than compresses). So retrieval feeds the
 same assembly layer the mapping tables point RAG at. `VectorIndex` is a dependency-free in-memory
 cosine index built on the governed `embed()` — right for small corpora, demos, and tests. For
 scale, wrap your own store:
@@ -159,7 +160,7 @@ graph TD
     Q["run(agent, query)"]
     RET["retrieve passages<br/>(VectorIndex or your store)"]
     EMB["embed(query)<br/>governed LLMCall on the bus (core)"]
-    ASM["assemble the window<br/>(contextkit; squeeze compresses oversized passages)"]
+    ASM["assemble the window<br/>(contextkit packs to the token budget)"]
     BUD["pre-flight budget<br/>(tokenguard)"]
     CALL["the model call<br/>core.instrument() → the bus"]
     OUT["Result + audit chain"]
@@ -175,9 +176,10 @@ graph TD
 Retrieved passages become part of the prompt, so retrieval sits *inside* the governed loop, not
 beside it:
 
-- **↔ [contextkit](/docs/contextkit)** (+ [squeeze](/docs/squeeze)) — with `context_budget` set,
-  passages are assembled into the token window alongside the conversation, oversized ones compressed
-  reversibly. This is the assembly layer the [feature map](getting-started.md#6-where-each-concept-lives)
+- **↔ [contextkit](/docs/contextkit)** — with `context_budget` set, passages are assembled into
+  the token window alongside the conversation. ([squeeze](/docs/squeeze) compression engages via
+  direct contextkit use — `evict="compress"` blocks — not through the SDK's packing path.) This is
+  the assembly layer the [feature map](getting-started.md#6-where-each-concept-lives)
   routes RAG to.
 - **↔ [cendor-core](/docs/core)** — every `embed()` is a governed `LLMCall` on the bus, correlated
   by `trace`, so an index build isn't an invisible bill.

@@ -161,7 +161,8 @@ __all__ = [
     "ToolCallEvent",
     "ToolResultEvent",
     "RunComplete",
-    # governance (the real tokenguard/acttrace objects, re-exported)
+    # governance (tokenguard/acttrace, re-exported; `guard` is the scope form of acttrace's
+    # enforcement, `register_model_price` is SDK-owned)
     "budget",
     "track",
     "report",
@@ -172,7 +173,8 @@ __all__ = [
     "Policy",
     "AuditLog",
     "verify",
-    # guardrails gate (the real cendor-guardrails objects, re-exported)
+    # guardrails gate (cendor-guardrails objects, re-exported; `rules` is the SDK's superset
+    # module — see the note at the top of this file)
     "Guardrail",
     "guardrail",
     "GuardrailTripped",

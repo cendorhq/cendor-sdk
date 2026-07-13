@@ -26,7 +26,10 @@ re-exports their objects, so the shapes are the same).
 
 ## The call-shape reference is shared
 
-The SDK's primitives *are* the library objects, re-exported — so the canonical trap table and
+The SDK's governance primitives (`budget`, `track`, `Policy`, `AuditLog`, `trace`, …) *are* the
+library objects, re-exported as identities; `guard` is acttrace's enforcement in the SDK's scope
+form, `rules` is the SDK's superset module, and the eval harness, `register_model_price`, and
+session stores are SDK-owned. The shapes are shared, so the canonical trap table and
 CI-typechecked examples live on one page for both doors:
 **[For AI assistants](/docs/for-ai-assistants)**. Don't duplicate it here; point your assistant at
 that URL (or the [full docs bundle](https://cendor.ai/llms-full.txt), which includes every SDK page).

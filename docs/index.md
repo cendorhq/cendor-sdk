@@ -57,9 +57,10 @@ Cendor is *production plumbing for LLM applications*, and there are two front do
   pick a framework and wire libraries together? The SDK gives you `Agent`, `tool`, and `run` with
   every governance layer one import away.
 
-Both doors expose the **same primitives** — `budget`, `guard`, `Policy`, `AuditLog`, `trace` are
-the *real* library objects, re-exported. Start on the SDK and drop down to the libraries later (or
-mix them in the same process); it's continuous, never a migration.
+Both doors expose the **same primitives** — `budget`, `Policy`, `AuditLog`, `trace` are the *real*
+library objects, re-exported, and `guard` is acttrace's policy enforcement in the SDK's scope
+form. Start on the SDK and drop down to the libraries later (or mix them in the same process);
+it's continuous, never a migration.
 
 <div class="mm-doors" aria-label="Two doors into Cendor, both riding the cendor-core seam; your provider client is external">
 <div class="mm-drow">
@@ -120,12 +121,12 @@ to the loop:
   once and replays it forever: offline, deterministic, free. Owned by [cassette](/docs/cassette).
 
 Context assembly is governed too: `Agent(context_budget=…)` fits history to a token budget through
-[contextkit](/docs/contextkit) (and [squeeze](/docs/squeeze) when installed). The full map of which
-SDK surface each library powers:
+[contextkit](/docs/contextkit) ([squeeze](/docs/squeeze) compression engages via direct contextkit
+use, not the SDK's trim path). The full map of which SDK surface each library powers:
 
 | SDK surface | Library | Learn more |
 |---|---|---|
-| `Agent(context_budget=…)` — fit history to a token budget | contextkit (+ squeeze when installed) | [/docs/contextkit](/docs/contextkit), [/docs/squeeze](/docs/squeeze) |
+| `Agent(context_budget=…)` — fit history to a token budget | contextkit (squeeze via direct contextkit use) | [/docs/contextkit](/docs/contextkit), [/docs/squeeze](/docs/squeeze) |
 | `budget()` / `track()` / price estimation | tokenguard | [/docs/tokenguard](/docs/tokenguard) |
 | `Agent(guardrails=[…])` / `rules.*` — the four-stage gate | cendor-guardrails | [/docs/guardrails](/docs/guardrails) |
 | `guard(Policy…)` / `AuditLog` / `decision()` | acttrace | [/docs/acttrace](/docs/acttrace) |

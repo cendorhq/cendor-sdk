@@ -156,7 +156,8 @@ its model call rides the same budget/audit seams as everything else — or pass 
 
 Where `SummarizingSession` *folds*, `context_budget` *trims*: set
 `Agent(context_budget=8000)` and each turn assembles the history to that token budget via
-[`contextkit`](/docs/contextkit) (with [`squeeze`](/docs/squeeze) compression when installed),
+[`contextkit`](/docs/contextkit), peeling the oldest turns first ([`squeeze`](/docs/squeeze)
+compression engages only via direct contextkit use — the SDK's trim path never compresses),
 emitting an audited `AssemblyReport` — a receipt of what was kept, shrunk, or dropped.
 
 ### Long-term / semantic memory

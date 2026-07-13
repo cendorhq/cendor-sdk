@@ -26,8 +26,8 @@ dependencies = [
   "cendor-tokenguard>=1.1,<2",   # budget()/track()
   "cendor-guardrails>=1.4,<2",   # + rules.intent / custom_category / presets / policy_schema / azure harm-categories (1.4)
   "cendor-acttrace>=1.4,<2",     # guardrail_decision metadata capture — policy_hash provenance (1.4)
-  "cendor-contextkit>=1.0,<2",   # assemble-to-budget + provider message adapters
-  "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; auto-wires via core's seam)
+  "cendor-contextkit>=1.0,<2",   # assemble-to-budget (context_budget history packing)
+  "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; contextkit discovers it at eviction)
   "cendor-cassette>=1.0,<2",     # record/replay — the SDK's test fixture format AND replay engine
 ]
 
