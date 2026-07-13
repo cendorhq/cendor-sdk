@@ -1,5 +1,12 @@
 # cendor-init changelog
 
+## 0.2.2 — 2026-07-13
+
+- `init --scaffold` now emits a provider-key line in the starter and next-steps (the SDK reads the
+  provider's standard env var, e.g. `OPENAI_API_KEY`, or `Agent(api_key=…)` — never a Cendor key).
+- Offline versions snapshot refreshed to the 2026-07-13 shelf (`cendor-sdk` 1.6.2 / `@cendor/sdk`
+  0.9.2, `cendor-init` / `@cendor/init` 0.2.2); `/releases` remains the source of truth.
+
 ## 0.2.1 — 2026-07-11
 
 - `doctor` warns when the installed `cendor-core`'s bundled price snapshot is more than 30 days old
