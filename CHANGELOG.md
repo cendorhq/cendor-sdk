@@ -4,6 +4,12 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.2] — 2026-07-19
+Gemini multi-turn tool loops (gemini-3.x). No API changes; a pure bug-fix release.
+
+### Fixed
+- **Gemini 3.x tool loops no longer 400 on the replay turn.** gemini-3.x returns a `thought_signature` alongside each `function_call` that must be echoed back on the next turn; without it the API rejects the replayed call (`Function call is missing a thought_signature in functionCall parts`). `ToolInvocation` now carries `thought_signature`, the Gemini adapter captures it on parse, and the canonical→Gemini translation re-emits it. Other providers are unaffected (the field is `None`).
+
 ## [1.7.1] — 2026-07-18
 Provider-adapter fixes surfaced by live black-box testing (Gemini, Ollama, structured output). No API changes; a pure bug-fix release.
 

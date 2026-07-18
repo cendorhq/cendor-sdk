@@ -61,11 +61,16 @@ class MissingAPIKeyError(RuntimeError):
 
 @dataclass
 class ToolInvocation:
-    """A tool call the model asked for: an id, the tool name, and parsed arguments."""
+    """A tool call the model asked for: an id, the tool name, and parsed arguments.
+
+    ``thought_signature`` carries a provider-opaque token (Gemini 3.x) that must be echoed back on
+    the replayed call, else the provider rejects the next turn. ``None`` for providers without one.
+    """
 
     id: str
     name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    thought_signature: Any = None
 
 
 @dataclass
@@ -123,6 +128,9 @@ def assistant_message(content: str | None, tool_calls: list[ToolInvocation]) -> 
                 "id": tc.id,
                 "type": "function",
                 "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                # provider-opaque token round-tripped verbatim (Gemini 3.x thought signatures);
+                # only present when the provider returned one, ignored by every other adapter.
+                **({"thought_signature": tc.thought_signature} if tc.thought_signature else {}),
             }
             for tc in tool_calls
         ]
@@ -863,14 +871,18 @@ def _canonical_to_gemini(messages: list[dict]) -> list[dict]:
                 parts.append({"text": _stringify(m["content"])})
             for tc in m.get("tool_calls") or []:
                 fn = tc.get("function", {})
-                parts.append(
-                    {
-                        "function_call": {
-                            "name": fn.get("name", ""),
-                            "args": _loads_args(fn.get("arguments")),
-                        }
+                part: dict[str, Any] = {
+                    "function_call": {
+                        "name": fn.get("name", ""),
+                        "args": _loads_args(fn.get("arguments")),
                     }
-                )
+                }
+                # Re-emit the Gemini 3.x thought signature as a sibling of function_call (required
+                # to replay a tool call — see ToolInvocation.thought_signature).
+                sig = tc.get("thought_signature")
+                if sig:
+                    part["thought_signature"] = sig
+                parts.append(part)
             out.append({"role": "model", "parts": parts or [{"text": ""}]})
         else:  # user / system-as-user fallback (supports multimodal content parts)
             out.append({"role": "user", "parts": _gemini_parts(m.get("content"))})
@@ -998,6 +1010,10 @@ class GeminiProvider(Provider):
                         id=f"call_{uuid.uuid4().hex[:8]}",
                         name=_get(fc, "name") or "",
                         arguments=dict(_get(fc, "args") or {}),
+                        # Gemini 3.x returns a thought_signature sibling of function_call that must
+                        # be echoed back on the replayed call, else the next turn 400s ("missing
+                        # thought_signature"). Capture it so _canonical_to_gemini can round-trip it.
+                        thought_signature=_get(p, "thought_signature"),
                     )
                 )
         content = _get(response, "text")

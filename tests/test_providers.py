@@ -541,6 +541,32 @@ def test_gemini_async_uses_the_aio_create_path():
     assert gp._create_path_for(True) == ("aio", "models", "generate_content")
 
 
+def test_gemini_thought_signature_round_trips():
+    """FINDINGS 2026-07-19 B7: gemini-3.x returns a thought_signature sibling of function_call that
+    must be echoed back on the replayed call (else the next turn 400s). parse() captures it and
+    _canonical_to_gemini() re-emits it."""
+    resp = {
+        "candidates": [
+            {
+                "finish_reason": "STOP",
+                "content": {
+                    "parts": [
+                        {
+                            "function_call": {"name": "get_weather", "args": {"city": "Paris"}},
+                            "thought_signature": "SIG123",
+                        }
+                    ]
+                },
+            }
+        ]
+    }
+    parsed = GeminiProvider().parse(resp)
+    assert parsed.tool_calls[0].thought_signature == "SIG123"
+    contents = _canonical_to_gemini([assistant_message(None, parsed.tool_calls)])
+    parts = contents[0]["parts"]
+    assert any(p.get("thought_signature") == "SIG123" for p in parts), f"not re-emitted: {parts}"
+
+
 def test_multimodal_content_translation():
     """A multimodal user turn (text + images) maps to each provider's image blocks."""
     data_url = "data:image/png;base64,QUJD"
