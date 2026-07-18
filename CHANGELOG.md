@@ -4,6 +4,15 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] — 2026-07-18
+Provider-adapter fixes surfaced by live black-box testing (Gemini, Ollama, structured output). No API changes; a pure bug-fix release.
+
+### Fixed
+- **Gemini tool calls no longer 400.** `Tool.to_gemini()` stamped `additionalProperties` (and other JSON-Schema keys) into the function declaration, which google-genai rejects with `400 INVALID_ARGUMENT` — so every tool-equipped Gemini agent failed. The declaration schema is now sanitized to the subset Gemini's `Schema` proto accepts (recursively).
+- **`run.aio()` works on Gemini.** The async path wrapped the *sync* `client.models.generate_content` and then awaited its non-awaitable result (`TypeError: object GenerateContentResponse can't be used in 'await'`). Async runs now target google-genai's async-native `client.aio.models.generate_content`. The async-detection shim is also hardened to never crash on a sync-only client (it runs it blocking instead), so a future sync-only provider degrades gracefully.
+- **Ollama tool loops survive the replay turn.** Canonical history stores tool-call `function.arguments` as a JSON string; the ollama client requires a dict and rejected the string (pydantic `dict_type` / server 400 `Value looks like object, but can't find closing '}' symbol`). `OllamaProvider.build_kwargs` now re-hydrates arguments to dicts for the ollama wire.
+- **Structured output tolerates fenced/wrapped JSON.** `output_type=` parsing did a bare `json.loads` and silently returned the raw string when a provider without a native JSON-schema mode (Anthropic/Ollama/HF) wrapped its JSON in a ```` ```json ```` fence or prose — breaking the declared type. Parsing now strips the fence / extracts the first balanced JSON value first.
+
 ## [1.7.0] — 2026-07-14
 The SDK inherits the libraries — verified. `guard` is now the identical acttrace object, embeddings are governed pre-flight, the pii bridge honors per-category actions, and a new parity/identity test suite pins every re-export so drift fails the build. Floors: `cendor-core>=1.6`, `cendor-acttrace>=1.5`.
 

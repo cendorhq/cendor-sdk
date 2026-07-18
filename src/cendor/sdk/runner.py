@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import re
 import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -221,15 +222,69 @@ def _schema_from_output_type(output_type: Any) -> dict | None:
     return None
 
 
+_NO_JSON = object()  # sentinel: no JSON value could be recovered from the text
+
+_FENCE_RE = re.compile(r"```(?:json)?\s*([\s\S]*?)```", re.IGNORECASE)
+
+
+def _loose_json_parse(text: str) -> Any:
+    """Recover a JSON value from model output that may be fenced or wrapped in prose.
+
+    Providers without a native JSON-schema mode (Anthropic, Ollama-without-format, HF) very commonly
+    wrap structured output in a ```json fence, so a bare ``json.loads`` returned the raw string and
+    silently broke the declared ``output_type``. Tries: whole string → fenced block → first balanced
+    ``{…}``/``[…]``. Returns :data:`_NO_JSON` when nothing parseable is found.
+    """
+    s = text.strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        pass
+    m = _FENCE_RE.search(s)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except json.JSONDecodeError:
+            pass
+    start = next((i for i, ch in enumerate(s) if ch in "{["), -1)
+    if start >= 0:
+        opener = s[start]
+        closer = "}" if opener == "{" else "]"
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(s)):
+            ch = s[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == opener:
+                depth += 1
+            elif ch == closer:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(s[start : i + 1])
+                    except json.JSONDecodeError:
+                        return _NO_JSON
+    return _NO_JSON
+
+
 def _parse_output(content: Any, output_type: Any) -> Any:
     if output_type is None or content is None:
         return content
     data: Any = content
     if isinstance(content, str):
-        try:
-            data = json.loads(content)
-        except json.JSONDecodeError:
+        parsed = _loose_json_parse(content)
+        if parsed is _NO_JSON:
             return content  # provider returned prose; hand it back unparsed
+        data = parsed
     if isinstance(output_type, dict):  # a raw JSON schema → return the parsed dict
         return data
     ctor: Any = output_type
@@ -393,7 +448,7 @@ async def run_agent_async(
     and is the only mode that applies input *redaction* before the call.
     """
     provider = agent.provider_impl
-    create = provider.create_method(_client_for(agent, async_=True))
+    create = provider.create_method(_client_for(agent, async_=True), async_=True)
     tools = agent.toolset if tools is None else tools
     resolve = agent.get_tool if resolve is None else resolve
     handoff_targets = handoff_targets or {}
@@ -764,7 +819,7 @@ async def stream_agent_async(
     messages = _prepare_messages(agent, input, session)
     run_id = uuid.uuid4().hex
     provider = agent.provider_impl
-    create = provider.create_method(_client_for(agent, async_=True))
+    create = provider.create_method(_client_for(agent, async_=True), async_=True)
     tools = agent.toolset
     json_mode = agent.output_type is not None
     turns = max_turns or agent.max_turns
@@ -977,7 +1032,7 @@ async def stream_agents_async(
         child = f"{parent}:{active.name}#{seg}"
         tools, tool_map, transfer_map = _effective(active, registry)
         provider = active.provider_impl
-        create = provider.create_method(_client_for(active, async_=True))
+        create = provider.create_method(_client_for(active, async_=True), async_=True)
         json_mode = active.output_type is not None
         turns = max_turns or active.max_turns
         gl = _gr.effective(active, None)

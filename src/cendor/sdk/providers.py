@@ -134,6 +134,29 @@ def tool_result_message(tool_call_id: str, name: str, content: str) -> dict:
     return {"role": "tool", "tool_call_id": tool_call_id, "name": name, "content": content}
 
 
+def _ollama_message(m: dict) -> dict:
+    """Map a canonical message onto the Ollama wire shape.
+
+    Assistant ``tool_calls`` keep OpenAI's structure except ``function.arguments``, which Ollama
+    wants as a dict (canonical stores it as a JSON string). Every other message passes through.
+    """
+    tcs = m.get("tool_calls")
+    if m.get("role") != "assistant" or not isinstance(tcs, list):
+        return m
+    mapped = dict(m)
+    mapped["tool_calls"] = [
+        {
+            **tc,
+            "function": {
+                "name": (tc.get("function") or {}).get("name", ""),
+                "arguments": _loads_args((tc.get("function") or {}).get("arguments")),
+            },
+        }
+        for tc in tcs
+    ]
+    return mapped
+
+
 def _stringify(content: Any) -> str:
     if content is None:
         return ""
@@ -319,7 +342,12 @@ def _ensure_async_detectable(client: Any, path: tuple[str, ...]) -> None:
 
     @functools.wraps(orig)
     async def _acreate(*args: Any, **kwargs: Any) -> Any:
-        return await orig(*args, **kwargs)
+        # Await only a genuine awaitable — a sync-only client (e.g. boto3 Bedrock) wrapped here
+        # must degrade to a blocking-but-correct call, never crash on "can't be used in await".
+        result = orig(*args, **kwargs)
+        if inspect.isawaitable(result):
+            return await result
+        return result
 
     try:
         setattr(owner, name, _acreate)
@@ -359,10 +387,17 @@ class Provider:
             f"Docs: https://cendor.ai/docs/sdk/providers#api-keys--credentials"
         )
 
+    def _create_path_for(self, async_: bool) -> tuple[str, ...]:
+        """The dotted path to the create method for a sync/async client.
+
+        Overridden where the async surface lives on a different attribute (e.g. google-genai's
+        ``client.aio.models.generate_content``). Defaults to the sync ``_create_path`` for both."""
+        return self._create_path
+
     def adopt(self, client: Any, async_: bool) -> Any:
         """Prepare a client for the loop: ensure async detection, then instrument (idempotent)."""
         if async_:
-            _ensure_async_detectable(client, self._create_path)
+            _ensure_async_detectable(client, self._create_path_for(True))
         return instrument(client)
 
     def client(self, async_: bool = False, config: dict | None = None) -> Any:
@@ -377,14 +412,15 @@ class Provider:
                 _placeholder_hints[id(client)] = self._missing_key_message()
         return client
 
-    def create_method(self, client: Any) -> Callable[..., Any]:
+    def create_method(self, client: Any, async_: bool = False) -> Callable[..., Any]:
         """The instrumented create method on ``client`` for this provider.
 
         A placeholder-backed client's create method is wrapped so a provider 401 raises an
         actionable :class:`MissingAPIKeyError` naming the env var to set, instead of the bare 401.
+        ``async_`` selects the async create surface where it differs (see :meth:`_create_path_for`).
         """
         target: Any = client
-        for attr in self._create_path:
+        for attr in self._create_path_for(async_):
             target = getattr(target, attr)
         message = _placeholder_hints.get(id(client))
         if message is not None:
@@ -898,6 +934,12 @@ class GeminiProvider(Provider):
     name = "google"
     _create_path = ("models", "generate_content")
 
+    def _create_path_for(self, async_: bool) -> tuple[str, ...]:
+        # google-genai's async surface is client.aio.models.generate_content (async-native). The
+        # sync client.models.generate_content returns a value that can't be awaited, so run.aio must
+        # target the aio path — else it raised "object … can't be used in 'await'".
+        return ("aio", "models", "generate_content") if async_ else self._create_path
+
     def _raw_client(self, async_: bool, config: dict) -> Any:
         from google import genai  # type: ignore
 
@@ -1093,7 +1135,11 @@ class OllamaProvider(Provider):
         wire: list[dict] = []
         if instructions:
             wire.append({"role": "system", "content": instructions})
-        wire.extend(messages)
+        # The canonical history stores tool-call ``function.arguments`` as a JSON *string* (OpenAI
+        # wire shape). The ollama client wants a dict there and rejects a string (pydantic
+        # ``dict_type`` / server 400 "Value looks like object, but can't find closing '}' symbol"),
+        # which killed the tool loop on the replay turn. Re-hydrate arguments to dicts.
+        wire.extend(_ollama_message(m) for m in messages)
         kwargs: dict[str, Any] = {"model": model, "messages": wire}
         formatted = self.format_tools(tools)
         if formatted:

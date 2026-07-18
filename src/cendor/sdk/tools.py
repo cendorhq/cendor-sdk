@@ -122,6 +122,21 @@ def _parse_arg_docs(doc: str) -> dict[str, str]:
     return out
 
 
+#: JSON-Schema keys the Gemini ``Schema`` proto rejects (stripped by :func:`_gemini_sanitize`).
+_GEMINI_DROP_KEYS = frozenset({"additionalProperties", "$schema", "title", "default"})
+
+
+def _gemini_sanitize(schema: Any) -> Any:
+    """Recursively strip JSON-Schema keys Gemini rejects (e.g. ``additionalProperties``)."""
+    if isinstance(schema, dict):
+        return {
+            k: _gemini_sanitize(v) for k, v in schema.items() if k not in _GEMINI_DROP_KEYS
+        }
+    if isinstance(schema, list):
+        return [_gemini_sanitize(v) for v in schema]
+    return schema
+
+
 def _build_schema(func: Callable) -> tuple[str, dict]:
     """Return ``(description, parameters_json_schema)`` for a function."""
     doc = inspect.getdoc(func) or ""
@@ -210,11 +225,17 @@ class Tool:
         }
 
     def to_gemini(self) -> dict:
-        """A single Gemini function declaration (providers wrap these in a declarations list)."""
+        """A single Gemini function declaration (providers wrap these in a declarations list).
+
+        google-genai validates the parameters against its ``Schema`` proto and **rejects unknown
+        JSON Schema keys** — notably ``additionalProperties`` (which the generic ``_build_schema``
+        always stamps on), causing a 400 ``INVALID_ARGUMENT`` on every tool-equipped call. Sanitize
+        the schema to the subset Gemini accepts.
+        """
         return {
             "name": self.name,
             "description": self.description,
-            "parameters": self.parameters,
+            "parameters": _gemini_sanitize(self.parameters),
         }
 
     def to_bedrock(self) -> dict:

@@ -27,6 +27,29 @@ def test_dataclass_output(build):
     assert result.output.conditions == "sunny"
 
 
+def test_dataclass_output_from_fenced_json(build):
+    """FINDINGS 2026-07-18 B6: providers without a native JSON-schema mode (Anthropic/Ollama/HF)
+    fence their output; the parser must strip the fence, not silently return the raw string."""
+    agent = Agent(name="w", model="gpt-4o", instructions="Report weather.", output_type=Weather)
+    fenced = '```json\n{"city": "Paris", "conditions": "sunny"}\n```'
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat(fenced)))
+        result = run(agent, "weather in Paris?")
+    assert isinstance(result.output, Weather)
+    assert result.output.city == "Paris"
+
+
+def test_dataclass_output_from_prose_wrapped_json(build):
+    """B6: a JSON object embedded in prose is extracted (first balanced object)."""
+    agent = Agent(name="w", model="gpt-4o", instructions="Report weather.", output_type=Weather)
+    prose = 'Sure! {"city": "Paris", "conditions": "sunny"} — hope that helps.'
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat(prose)))
+        result = run(agent, "weather in Paris?")
+    assert isinstance(result.output, Weather)
+    assert result.output.conditions == "sunny"
+
+
 def test_json_schema_dict_output(build):
     schema = {
         "type": "object",

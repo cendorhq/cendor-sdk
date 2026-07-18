@@ -503,6 +503,44 @@ def test_gemini_bedrock_build_kwargs_carry_tool_history():
     assert any("Sunny" in str(m) for m in bk["messages"])
 
 
+def test_gemini_tool_schema_strips_additional_properties():
+    """FINDINGS 2026-07-18 B3: google-genai rejects `additionalProperties` in a function declaration
+    (400 INVALID_ARGUMENT), so `to_gemini()` must sanitize it out — recursively."""
+
+    @tool
+    def register(name: str, address: _Address) -> str:
+        """Register a user."""
+        return "ok"
+
+    decl = register.to_gemini()
+    params = decl["parameters"]
+    assert "additionalProperties" not in params
+    # nested object params (the dataclass) must be sanitized too
+    assert "additionalProperties" not in params["properties"]["address"]
+    # the useful schema survives
+    assert params["type"] == "object"
+    assert set(params["properties"]) == {"name", "address"}
+
+
+def test_ollama_build_kwargs_rehydrates_tool_arguments_to_dict():
+    """FINDINGS 2026-07-18 B4: canonical history stores tool-call arguments as a JSON string; the
+    ollama client rejects a string (pydantic dict_type / server 400), so build_kwargs must map it to
+    a dict for the ollama wire."""
+    kw = OllamaProvider().build_kwargs("llama3.2", _tool_history(), [], "")
+    asst = next(m for m in kw["messages"] if m["role"] == "assistant")
+    args = asst["tool_calls"][0]["function"]["arguments"]
+    assert isinstance(args, dict)
+    assert args == {"city": "Paris"}
+
+
+def test_gemini_async_uses_the_aio_create_path():
+    """FINDINGS 2026-07-18 B5: run.aio on Gemini must target the async-native
+    `client.aio.models.generate_content`; the sync path returns a non-awaitable and raised."""
+    gp = GeminiProvider()
+    assert gp._create_path_for(False) == ("models", "generate_content")
+    assert gp._create_path_for(True) == ("aio", "models", "generate_content")
+
+
 def test_multimodal_content_translation():
     """A multimodal user turn (text + images) maps to each provider's image blocks."""
     data_url = "data:image/png;base64,QUJD"
