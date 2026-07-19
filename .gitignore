@@ -18,6 +18,10 @@ htmlcov/
 .DS_Store
 *.log
 
+# Secrets — never commit
+.env
+.env.*
+
 # Local scratch / audit artifacts produced by examples & tests
 audit.jsonl
 *.audit.jsonl
