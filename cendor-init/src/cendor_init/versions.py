@@ -10,7 +10,7 @@ INDEPENDENT across languages; the parity matrix, not matching numbers, is the co
 
 from __future__ import annotations
 
-AS_OF = "2026-07-18"
+AS_OF = "2026-07-19"
 
 PYPI: dict[str, str] = {
     "cendor-core": "1.6.0",
@@ -23,6 +23,6 @@ PYPI: dict[str, str] = {
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
     "cendor-sdk": "1.7.2",
-    "cendor-mcp": "0.1.3",
+    "cendor-mcp": "0.1.4",
     "cendor-init": "0.2.2",
 }
