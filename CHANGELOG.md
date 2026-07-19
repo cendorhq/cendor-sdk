@@ -4,6 +4,15 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-07-19
+OpenTelemetry observability export, re-exported from the governance libraries. Backward-compatible.
+
+### Added
+- **`OTelMirror`** (from `cendor-acttrace` ≥ 1.6) and **`BudgetEvent`** (from `cendor-tokenguard` ≥ 1.2) are now re-exported on the SDK surface. Attach `AuditLog(system, mirror=OTelMirror())` to stream the governed loop's audit trail — decisions, guardrail actions, `budget_event`s, human oversight — to any OpenTelemetry backend as an operational copy (the hash-chained file stays the sole `verify()` evidence). Pre-flight budget actions (`blocked`/`downgraded`/`clamped`) ride the bus as `BudgetEvent` and are chained + mirrored. Pairs with the existing `cendor.sdk.otel` span tree. See https://cendor.ai/docs/observability
+
+### Changed
+- Dependency floors: `cendor-acttrace>=1.6`, `cendor-tokenguard>=1.2`.
+
 ## [1.7.2] — 2026-07-19
 Gemini multi-turn tool loops (gemini-3.x). No API changes; a pure bug-fix release.
 

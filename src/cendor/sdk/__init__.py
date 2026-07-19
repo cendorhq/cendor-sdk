@@ -29,7 +29,7 @@ from importlib.metadata import PackageNotFoundError, version
 # --- audit + redaction (cendor-acttrace, re-exported) -------------------------------------------
 # `guard` is the IDENTICAL acttrace object (since cendor-acttrace 1.5.0 its return is dual-shape:
 # a plain interceptor that is also a context manager) — `cendor.sdk.guard is cendor.acttrace.guard`.
-from cendor.acttrace import AuditLog, Policy, PolicyViolation, guard, verify
+from cendor.acttrace import AuditLog, OTelMirror, Policy, PolicyViolation, guard, verify
 
 # --- correlation + event types (cendor-core) ----------------------------------------------------
 # `LLMCall`/`ToolCall`/`Usage`/`Money` are re-exported for isinstance checks and typing over
@@ -59,6 +59,7 @@ from cendor.guardrails.judge import task_adherence
 # --- budgets + attribution (cendor-tokenguard, re-exported) -------------------------------------
 # `downgrades()`/`clamps()` expose what a pre-flight `on_exceed="downgrade"`/token clamp rerouted.
 from cendor.tokenguard import (
+    BudgetEvent,
     BudgetExceeded,
     budget,
     clamps,
@@ -186,10 +187,12 @@ __all__ = [
     "clamps",
     "register_model_price",
     "BudgetExceeded",
+    "BudgetEvent",
     "guard",
     "PolicyViolation",
     "Policy",
     "AuditLog",
+    "OTelMirror",
     "verify",
     # guardrails gate (cendor-guardrails objects, re-exported; `rules` is the SDK's superset
     # module — see the note at the top of this file)
