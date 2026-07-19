@@ -119,7 +119,7 @@ console.log(result.toolSteps.map((s) => s.name));    // ["get_weather"]
 
 What each line buys you (and the library it comes from):
 
-- `@tool` / `tool(...)` — the JSON Schema comes from type hints + docstring (Python) or a zod
+- `@tool` / `tool(...)` — the JSON Schema comes from type hints + docstring (Python) or a zod 4
   schema (TS); it's formatted per provider automatically.
 - `budget(usd=0.25, on_exceed="block")` — a **pre-flight** cap: the over-budget call never runs
   (from [tokenguard](/docs/tokenguard)).

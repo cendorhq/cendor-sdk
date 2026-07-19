@@ -106,8 +106,9 @@ today, a no-op elsewhere — and cached tokens price through to `Result.cost` au
 
 `@tool` (Python) / `tool(...)` (TypeScript) turns a plain function into a `Tool`. In Python the
 JSON Schema comes from the type hints and the description from the docstring; in TypeScript —
-no runtime type hints — the schema is a [zod](https://zod.dev) object, the same pattern as the
-Vercel AI SDK. Sync and async both work.
+no runtime type hints — the schema is a [zod 4](https://zod.dev) object, the same pattern as the
+Vercel AI SDK. Sync and async both work. (zod ships with `@cendor/sdk`; pass a pre-built JSON
+Schema via `jsonSchema:` if you'd rather not use zod.)
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
