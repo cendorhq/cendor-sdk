@@ -129,9 +129,7 @@ _GEMINI_DROP_KEYS = frozenset({"additionalProperties", "$schema", "title", "defa
 def _gemini_sanitize(schema: Any) -> Any:
     """Recursively strip JSON-Schema keys Gemini rejects (e.g. ``additionalProperties``)."""
     if isinstance(schema, dict):
-        return {
-            k: _gemini_sanitize(v) for k, v in schema.items() if k not in _GEMINI_DROP_KEYS
-        }
+        return {k: _gemini_sanitize(v) for k, v in schema.items() if k not in _GEMINI_DROP_KEYS}
     if isinstance(schema, list):
         return [_gemini_sanitize(v) for v in schema]
     return schema
