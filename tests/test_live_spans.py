@@ -6,7 +6,19 @@ from __future__ import annotations
 import respx
 
 from cendor.sdk import Agent, run, tool
-from cendor.sdk.otel import live_spans
+from cendor.sdk.otel import live_spans, span_tree
+
+
+def _mem_tracer():
+    """A TracerProvider wired to an in-memory exporter; returns (tracer, exporter)."""
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    return provider.get_tracer("test"), exporter
 
 
 @tool
@@ -67,3 +79,33 @@ def test_live_spans_never_breaks_a_run(build):
         with live_spans():
             result = run(agent, "hi")
     assert result.output == "hi"
+
+
+def test_live_spans_stamps_conversation_id(build):
+    # W6: a known session/conversation id lands on the root as gen_ai.conversation.id.
+    tracer, exporter = _mem_tracer()
+    agent = Agent(name="a", model="gpt-4o", instructions="hi")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        with live_spans(tracer=tracer, conversation_id="chat-42"):
+            run(agent, "hi")
+    root = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
+    assert root.attributes["gen_ai.conversation.id"] == "chat-42"
+
+
+def test_span_tree_conversation_id_present_only_when_given(build):
+    tracer, exporter = _mem_tracer()
+    agent = Agent(name="a", model="gpt-4o", instructions="hi")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        result = run(agent, "hi")
+
+    assert span_tree(result, tracer=tracer, conversation_id="chat-42") is True
+    root = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
+    assert root.attributes["gen_ai.conversation.id"] == "chat-42"
+
+    # Default: no key stamped (nothing leaks when the caller isn't grouping a conversation).
+    exporter.clear()
+    assert span_tree(result, tracer=tracer) is True
+    root2 = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
+    assert "gen_ai.conversation.id" not in root2.attributes

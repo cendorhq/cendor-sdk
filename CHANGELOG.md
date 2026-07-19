@@ -4,6 +4,18 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-07-20
+`gen_ai.conversation.id` grouping for multi-turn runs. Backward-compatible (additive, opt-in).
+
+### Added
+- **`live_spans(..., conversation_id=…)`** and **`span_tree(result, ..., conversation_id=…)`** now
+  accept an optional conversation/session id (e.g. your `SQLiteSessionStore` key). When given, the
+  root `agent.run` span carries it as the OpenTelemetry `gen_ai.conversation.id` semantic-convention
+  attribute, so a backend can group the runs of one multi-turn conversation. Omitted by default (no
+  key leaks when you aren't grouping). Libs-only users can pass any `gen_ai.*` attribute — including
+  `gen_ai.conversation.id` — through `cendor.core.otel.span(...)`'s existing attributes argument.
+  See https://cendor.ai/docs/observability
+
 ## [1.8.0] — 2026-07-19
 OpenTelemetry observability export, re-exported from the governance libraries. Backward-compatible.
 

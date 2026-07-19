@@ -206,7 +206,10 @@ live.close();               // …and stop
 <!-- /tabs -->
 
 Spans carry `gen_ai.request.model`, `gen_ai.system`, `gen_ai.usage.input_tokens` /
-`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`.
+`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`. Pass `conversation_id=`
+(Python) / `{ conversationId }` (TypeScript) — e.g. your session / `SQLiteSessionStore` key — to
+`live_spans` / `span_tree` to stamp `gen_ai.conversation.id` on the root `agent.run` span, so a
+backend can group the runs of one multi-turn conversation.
 
 ## Human-in-the-loop — approvals in the audit chain
 

@@ -28,14 +28,21 @@ def _group_by_agent(steps: list[Step]) -> list[tuple[str, list[Step]]]:
     return groups
 
 
-def span_tree(result: Result, tracer: Any = None) -> bool:
+def span_tree(result: Result, tracer: Any = None, *, conversation_id: str | None = None) -> bool:
     """Emit a ``gen_ai`` span tree for ``result``. ``True`` if emitted, ``False`` if OTel absent.
+
+    Args:
+        result: The finished run to render as a span tree.
+        tracer: An OTel tracer; defaults to ``get_tracer("cendor.sdk")``.
+        conversation_id: Optional multi-turn grouping id (e.g. your ``SQLiteSessionStore`` key).
+            When set, the root ``agent.run`` span carries it as the ``gen_ai.conversation.id``
+            semantic-convention attribute, so a backend can group the runs of one session.
 
     ```python
     from cendor.sdk import run
     from cendor.sdk.otel import span_tree
     result = run(agent, "...")
-    span_tree(result)   # -> spans exported to your configured OTel pipeline
+    span_tree(result, conversation_id="chat-42")   # -> spans exported to your OTel pipeline
     ```
     """
     try:
@@ -47,6 +54,8 @@ def span_tree(result: Result, tracer: Any = None) -> bool:
     with tracer.start_as_current_span("agent.run") as root:
         root.set_attribute("gen_ai.operation.name", "agent")
         root.set_attribute("cendor.run.id", result.trace_id)
+        if conversation_id:
+            root.set_attribute("gen_ai.conversation.id", conversation_id)
         root.set_attribute("cendor.run.agents", ",".join(result.agents))
         root.set_attribute("gen_ai.usage.input_tokens", result.usage.input_tokens)
         root.set_attribute("gen_ai.usage.output_tokens", result.usage.output_tokens)
@@ -114,22 +123,26 @@ def _set_tool_attrs(span: Any, call: Any) -> None:
 
 
 @contextmanager
-def live_spans(tracer: Any = None, *, name: str = "agent.run") -> Any:
+def live_spans(
+    tracer: Any = None, *, name: str = "agent.run", conversation_id: str | None = None
+) -> Any:
     """Emit ``gen_ai`` spans **live** as a run progresses — the streaming counterpart to
     :func:`span_tree` (which builds the tree post-hoc from a finished ``Result``). Wrap a run:
 
     ```python
     from cendor.sdk import run
     from cendor.sdk.otel import live_spans
-    with live_spans():
-        result = run(agent, "...")
+    with live_spans(conversation_id="chat-42"):
+        result = run(agent, "...", session=mem)
     ```
 
     A root ``agent.run`` span brackets the block; a child ``chat {model}`` / ``execute_tool {name}``
     span is emitted the moment each call completes (its start time backdated by the call's
     ``latency_ms`` so the duration is accurate), so a live backend sees the trajectory in real time
     rather than all at once at the end. Works for single- and multi-agent runs (each span carries a
-    ``cendor.trace_id``). A **no-op** (still runs the block) if OpenTelemetry isn't installed.
+    ``cendor.trace_id``). Pass ``conversation_id=`` (e.g. your session/store key) to stamp
+    ``gen_ai.conversation.id`` on the root span so multi-turn runs group as one conversation. A
+    **no-op** (still runs the block) if OpenTelemetry isn't installed.
     """
     try:
         from opentelemetry import trace as ot
@@ -144,6 +157,8 @@ def live_spans(tracer: Any = None, *, name: str = "agent.run") -> Any:
     tracer = tracer or ot.get_tracer("cendor.sdk")
     with tracer.start_as_current_span(name) as root:
         root.set_attribute("gen_ai.operation.name", "agent")
+        if conversation_id:
+            root.set_attribute("gen_ai.conversation.id", conversation_id)
         ctx = ot.set_span_in_context(root)
 
         def on_event(ev: Any) -> None:
