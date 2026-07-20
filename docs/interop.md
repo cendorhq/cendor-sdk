@@ -219,6 +219,19 @@ Pass `label=` (Python) / `{ label }` (TypeScript) to stamp a short, human-author
 values stay off spans by design (the monitor may be pointed at shared infra); a label is a
 deliberate, non-sensitive tag you choose.
 
+### Observability & Cendor Monitor
+
+That same wire is what makes an SDK run *watchable*. Because `run(session=…)` (a `Session`, an
+`SQLiteSessionStore` key, or any conversation id) auto-stamps `gen_ai.conversation.id` on the root
+span, a backend can group every run of one multi-turn conversation — and the first-party way to *see*
+that grouping is [**Cendor Monitor**](/docs/monitor), a free, self-hosted **journey console**. Point
+one `docker run` at `OTEL_EXPORTER_OTLP_ENDPOINT` and your SDK runs drill **Agents → Sessions → the
+run journey**: the whole conversation with tokens, cost, latency, and TTFT per step, and the exact
+step where a budget or guardrail acted, inline. It runs on your infrastructure — Cendor never operates
+a telemetry endpoint — and your own OTel backend stays the production default. See
+[Cendor Monitor](/docs/monitor) (docs) or [cendor.ai/monitor](/monitor). The console is an operational
+copy — `verify()` still runs on the audit **file**, never on what the console shows.
+
 ## Human-in-the-loop — approvals in the audit chain
 
 [acttrace](/docs/acttrace) records *that* oversight happened; the pause/approve/resume mechanics
