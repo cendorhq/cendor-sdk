@@ -17,6 +17,48 @@ from cendor.core.types import LLMCall, ToolCall
 from .result import Result, Step
 
 
+def _system_from_call(call: Any) -> Any:
+    """Best-effort system prompt from a call's request kwargs — covers providers where the system
+    prompt is a kwarg (Anthropic ``system``, Responses ``instructions``, Gemini
+    ``system_instruction``, Bedrock ``system``) rather than a message. For chat-completions/Ollama
+    it's already in ``call.messages`` (so ``None`` here avoids double-capture). Content only.
+    """
+    kw = (getattr(call, "metadata", None) or {}).get("request_kwargs")
+    if not isinstance(kw, dict):
+        return None
+    for key in ("instructions", "system", "system_instruction"):
+        v = kw.get(key)
+        if v:
+            return v
+    cfg = kw.get("config")
+    if isinstance(cfg, dict) and cfg.get("system_instruction"):
+        return cfg["system_instruction"]
+    if cfg is not None and getattr(cfg, "system_instruction", None):
+        return cfg.system_instruction
+    return None
+
+
+def _call_content_attrs(call: Any) -> dict[str, str]:
+    """The ``gen_ai.*`` content span attributes for a chat call (G17/G18), or ``{}`` when capture is
+    off. Input from the call's messages, output (incl. thinking) parsed from the raw response."""
+    from cendor.core import otel as _co
+
+    return _co.content_attrs(
+        system=_system_from_call(call),
+        input_messages=getattr(call, "messages", None),
+        output_messages=_co.response_messages(call),
+    )
+
+
+def _tool_content_attrs(call: Any) -> dict[str, str]:
+    """The tool arg/result content span attributes (G17), or ``{}`` when capture is off."""
+    from cendor.core import otel as _co
+
+    return _co.tool_content_attrs(
+        arguments=getattr(call, "arguments", None), result=getattr(call, "result", None)
+    )
+
+
 def _group_by_agent(steps: list[Step]) -> list[tuple[str, list[Step]]]:
     """Contiguous groups of steps by agent, preserving order."""
     groups: list[tuple[str, list[Step]]] = []
@@ -61,6 +103,9 @@ def span_tree(
         return False
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
+    # G19: fall back to the conversation id the runner propagated from the session key (explicit
+    # arg wins). semconv: only a real key is used, never a synthesized one.
+    conversation_id = conversation_id or getattr(result, "conversation_id", "") or None
     with tracer.start_as_current_span("agent.run") as root:
         root.set_attribute("gen_ai.operation.name", "agent")
         root.set_attribute("cendor.run.id", result.trace_id)
@@ -101,6 +146,10 @@ def span_tree(
                                     )
                             if step.cost is not None:
                                 s.set_attribute("gen_ai.usage.cost", str(step.cost.amount))
+                            if (step.call.metadata or {}).get("replayed"):
+                                s.set_attribute("cendor.replayed", True)  # G22 cassette replay
+                            for k, v in _call_content_attrs(step.call).items():  # G17/G18
+                                s.set_attribute(k, v)
                     else:
                         with tracer.start_as_current_span(f"execute_tool {step.name}") as s:
                             s.set_attribute("gen_ai.operation.name", "execute_tool")
@@ -108,6 +157,8 @@ def span_tree(
                             s.set_attribute("gen_ai.agent.name", agent_name)
                             s.set_attribute("cendor.step", step_no)
                             _set_tool_attrs(s, step.call)
+                            for k, v in _tool_content_attrs(step.call).items():  # G17
+                                s.set_attribute(k, v)
     return True
 
 
@@ -185,10 +236,12 @@ def live_spans(
     from decimal import Decimal
 
     from cendor.core import bus
+    from cendor.core import otel as _co
 
-    from ._governance import current_agent
+    from ._governance import current_agent, current_conversation
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
+    _co.enter_live_spans()  # G20: the core bus→span emitter stands down while we own the spans
     with tracer.start_as_current_span(name) as root:
         root.set_attribute("gen_ai.operation.name", "agent")
         if conversation_id:
@@ -202,9 +255,10 @@ def live_spans(
         total_output = 0
         total_cost = Decimal("0")
         run_id_set = False
+        conv_set = bool(conversation_id)
 
         def on_event(ev: Any) -> None:
-            nonlocal step_no, total_input, total_output, total_cost, run_id_set
+            nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set
             if not isinstance(ev, (LLMCall, ToolCall)):
                 return
             trace_id = getattr(ev, "trace_id", "") or ""
@@ -215,6 +269,13 @@ def live_spans(
                 root.set_attribute("cendor.run.id", trace_id)
                 root.set_attribute("cendor.trace_id", trace_id)
                 run_id_set = True
+            if not conv_set:
+                # G19: learn the conversation id the runner propagated from the session key (no
+                # explicit arg was passed). Only a real key is used, never synthesized.
+                cid = current_conversation()
+                if cid:
+                    root.set_attribute("gen_ai.conversation.id", cid)
+                    conv_set = True
             step_no += 1
             agent = current_agent()
             end = time.time_ns()
@@ -244,6 +305,10 @@ def live_spans(
                 if ev.cost is not None:
                     span.set_attribute("gen_ai.usage.cost", str(ev.cost.amount))
                     total_cost += ev.cost.amount
+                if (ev.metadata or {}).get("replayed"):
+                    span.set_attribute("cendor.replayed", True)  # G22 cassette replay
+                for k, v in _call_content_attrs(ev).items():  # G17/G18
+                    span.set_attribute(k, v)
             else:
                 span = tracer.start_span(f"execute_tool {ev.name}", context=ctx, start_time=start)
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
@@ -253,6 +318,8 @@ def live_spans(
                 if agent:
                     span.set_attribute("gen_ai.agent.name", agent)
                 _set_tool_attrs(span, ev)
+                for k, v in _tool_content_attrs(ev).items():  # G17
+                    span.set_attribute(k, v)
             span.end(end_time=end)
 
         bus.subscribe(on_event)
@@ -260,6 +327,7 @@ def live_spans(
             yield
         finally:
             bus.unsubscribe(on_event)
+            _co.exit_live_spans()
             # Usage/cost rollups on the root at close — parity with span_tree's finished totals.
             root.set_attribute("gen_ai.usage.input_tokens", total_input)
             root.set_attribute("gen_ai.usage.output_tokens", total_output)

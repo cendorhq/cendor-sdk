@@ -23,7 +23,7 @@ from cendor.core import bus, trace
 from cendor.core.types import LLMCall, ToolCall
 
 from . import _guardrails as _gr
-from ._governance import _scope
+from ._governance import _conversation_scope, _scope
 from ._governance import current_agent as _current_agent
 from .providers import assistant_message, tool_result_message
 from .resilience import RetryPolicy, acall_with_retry, call_with_retry
@@ -651,6 +651,7 @@ class Runner:
             output=_parse_output(output, self.agent.output_type),
             steps=[],
             trace_id=state.get("run_id") or "",
+            conversation_id=getattr(self.session, "id", None) or "",
             agents=[self.agent.name],
             messages=list(state.get("messages") or []),
             incomplete=output is None,
@@ -668,6 +669,7 @@ class Runner:
             output=_parse_output(output, self.agent.output_type),
             steps=steps,
             trace_id=run_id,
+            conversation_id=getattr(self.session, "id", None) or "",
             agents=[self.agent.name],
             messages=messages,
             incomplete=output is None,  # no final answer (e.g. max_turns hit mid tool loop)
@@ -680,18 +682,19 @@ class Runner:
             return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
         with _gr.collecting():  # collect decisions for Result.guardrail_decisions
-            with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
-                output, steps, _ = run_agent_sync(
-                    self.agent,
-                    messages,
-                    run_id,
-                    audit=self.audit,
-                    max_turns=self.max_turns,
-                    retry=self.retry,
-                    on_turn=on_turn,
-                    on_step=self.on_step,
-                    guardrails=self.guardrails,
-                )
+            with _conversation_scope(self.session):  # G19: propagate the session key to live_spans
+                with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight)
+                    output, steps, _ = run_agent_sync(
+                        self.agent,
+                        messages,
+                        run_id,
+                        audit=self.audit,
+                        max_turns=self.max_turns,
+                        retry=self.retry,
+                        on_turn=on_turn,
+                        on_step=self.on_step,
+                        guardrails=self.guardrails,
+                    )
             return self._finish(run_id, output, steps, messages)
 
     async def run_async(self, input: Any) -> Result:
@@ -700,19 +703,20 @@ class Runner:
             return self._resumed_result(done)
         messages, run_id, on_turn = self._start(input)
         with _gr.collecting():  # collect decisions for Result.guardrail_decisions
-            with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight block)
-                output, steps, _ = await run_agent_async(
-                    self.agent,
-                    messages,
-                    run_id,
-                    audit=self.audit,
-                    max_turns=self.max_turns,
-                    retry=self.retry,
-                    on_turn=on_turn,
-                    on_step=self.on_step,
-                    guardrails=self.guardrails,
-                    guardrail_mode=self.guardrail_mode,
-                )
+            with _conversation_scope(self.session):  # G19: propagate the session key to live_spans
+                with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight)
+                    output, steps, _ = await run_agent_async(
+                        self.agent,
+                        messages,
+                        run_id,
+                        audit=self.audit,
+                        max_turns=self.max_turns,
+                        retry=self.retry,
+                        on_turn=on_turn,
+                        on_step=self.on_step,
+                        guardrails=self.guardrails,
+                        guardrail_mode=self.guardrail_mode,
+                    )
             return self._finish(run_id, output, steps, messages)
 
 

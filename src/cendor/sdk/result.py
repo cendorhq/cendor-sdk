@@ -58,6 +58,11 @@ class Result:
     trace_id: str = ""
     """The run id every step shares (set via ``cendor.core.trace``)."""
 
+    conversation_id: str = ""
+    """The conversation/session id this run belongs to, when it was run with a keyed session (G19).
+    ``span_tree`` stamps it as ``gen_ai.conversation.id`` so a monitor groups a multi-turn thread.
+    Empty when the run had no keyed session — a conversation id is never synthesized."""
+
     agents: list[str] = field(default_factory=list)
     """The agents that participated, in first-seen order (one, for a single-agent run)."""
 

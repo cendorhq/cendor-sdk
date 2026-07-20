@@ -4,6 +4,18 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] — 2026-07-20
+Opt-in content on the run spans + auto session grouping — the SDK half of the Cendor journey console (Monitor v3). Backward-compatible (additive); content stays OFF unless you opt in with `cendor.core.otel.capture_content()`.
+
+### Added
+- **Opt-in content on `span_tree` / `live_spans` (G17/G18).** When content capture is on (core 1.7's `otel.capture_content()`), each `chat` step span carries `gen_ai.input.messages`, `gen_ai.output.messages` (incl. parsed **thinking** parts), and `gen_ai.system_instructions` (extracted from the request kwargs for Anthropic/Responses/Gemini/Bedrock, where the system prompt isn't a message); each `execute_tool` span carries `cendor.tool.arguments` / `cendor.tool.result`. All masked + byte-capped by the core config, and **never** on `audit.*` spans (rule 6). Off by default.
+- **Auto conversation id (G19).** `run(session=…)` propagates the session's key as `gen_ai.conversation.id` on the run span — `SQLiteSessionStore.load(id)` now stamps `Session.id`, and `Session(id=…)` works for the in-memory case. `live_spans` reads it live; `span_tree` reads it from `Result.conversation_id` (new field). An explicit `conversation_id=` argument still wins; a conversation id is **never synthesized** (semconv).
+- **Cassette replay flag on run spans (G22).** A replayed `chat` step carries `cendor.replayed=true`.
+- **G20 co-existence.** `live_spans` signals core's opt-in bus→span emitter to stand down while it owns the spans (no double emission).
+
+### Changed
+- Dependency floor `cendor-core >= 1.7` (content-capture helpers).
+
 ## [1.10.0] — 2026-07-20
 Richer run spans for the monitor: agent-named, step-numbered call spans, a live tree at parity with the post-hoc one, and an opt-in run label. Backward-compatible (additive). Dependency floors bumped to the V2 emission wave (`cendor-tokenguard >= 1.3`, `cendor-acttrace >= 1.7`, `cendor-guardrails >= 1.6`).
 

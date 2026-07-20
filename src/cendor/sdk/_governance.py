@@ -31,6 +31,32 @@ def current_agent() -> str:
     return _active_agent.get()
 
 
+#: The conversation id of the run in flight (set by the runner from the session key, G19). Read by
+#: ``otel.live_spans`` to stamp ``gen_ai.conversation.id`` on the root span. Empty when no run, or
+#: when the run's session carries no id (semconv: never synthesize one).
+_active_conversation: ContextVar[str] = ContextVar("cendor_sdk_active_conversation", default="")
+
+
+def current_conversation() -> str:
+    """The conversation id of the run in flight (from the session key), or ``""``."""
+    return _active_conversation.get()
+
+
+@contextmanager
+def _conversation_scope(session: Any) -> Any:
+    """Set the ambient conversation id from a session's key for the duration of a run (G19). No-op
+    when there is no session or it has no id — a conversation id is never synthesized."""
+    cid = getattr(session, "id", None) if session is not None else None
+    if not cid:
+        yield
+        return
+    token = _active_conversation.set(str(cid))
+    try:
+        yield
+    finally:
+        _active_conversation.reset(token)
+
+
 @contextmanager
 def _scope(agent: Agent) -> Any:
     """Per-agent governance: attribute spend to the agent + enforce its ``max_usd`` cap if set.

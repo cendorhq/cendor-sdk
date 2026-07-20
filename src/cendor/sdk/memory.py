@@ -30,6 +30,11 @@ class Session:
     """
 
     messages: list[dict] = field(default_factory=list)
+    #: Optional conversation id. ``SQLiteSessionStore.load`` stamps the store key here; set it
+    #: yourself (``Session(id="chat-42")``) for the in-memory case. When set, ``run(session=…)``
+    #: propagates it as the run's ``gen_ai.conversation.id`` so a monitor groups a multi-turn
+    #: conversation (G19). Never synthesized — a conversation id is always one you chose.
+    id: str | None = None
 
     def add(self, message: dict) -> None:
         """Append one message."""
@@ -242,8 +247,8 @@ class SQLiteSessionStore:
             "SELECT messages FROM sessions WHERE id = ?", (session_id,)
         ).fetchone()
         if row is None:
-            return Session()
-        return Session(messages=list(json.loads(row[0])))
+            return Session(id=session_id)
+        return Session(messages=list(json.loads(row[0])), id=session_id)
 
     def ids(self) -> list[str]:
         """All stored session ids."""
