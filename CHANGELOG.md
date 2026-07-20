@@ -4,6 +4,17 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] — 2026-07-20
+Richer run spans for the monitor: agent-named, step-numbered call spans, a live tree at parity with the post-hoc one, and an opt-in run label. Backward-compatible (additive). Dependency floors bumped to the V2 emission wave (`cendor-tokenguard >= 1.3`, `cendor-acttrace >= 1.7`, `cendor-guardrails >= 1.6`).
+
+### Added
+- **Run label (`live_spans(label=…)` / `span_tree(result, label=…)`)** → `cendor.run.label` on the root `agent.run` span, so a monitor can show what a run was *for*. It is a deliberate, short, non-sensitive string you choose — **never derived from the prompt** (prompts/tool values stay off spans).
+- **Agent name + step index on every call span.** `chat`/`execute_tool` spans now carry `gen_ai.agent.name` (which agent made the call) and a 1-based `cendor.step` ordinal, in both `span_tree` and `live_spans`.
+- **`live_spans` parity with `span_tree`.** The live root now carries `cendor.run.id` / `cendor.trace_id` (learned from the run's correlation id) and, at close, the run's `gen_ai.usage.input_tokens` / `output_tokens` and `cendor.run.cost_usd` rollups.
+
+### Changed
+- The per-agent `max_usd` ceiling opened by the SDK is now **named** (`agent:<name> max_usd`), so a block by an agent's cap is attributable in a monitor (via `tokenguard 1.3`'s `budget(name=)`).
+
 ## [1.9.0] — 2026-07-20
 `gen_ai.conversation.id` grouping for multi-turn runs. Backward-compatible (additive, opt-in).
 

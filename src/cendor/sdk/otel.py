@@ -28,7 +28,13 @@ def _group_by_agent(steps: list[Step]) -> list[tuple[str, list[Step]]]:
     return groups
 
 
-def span_tree(result: Result, tracer: Any = None, *, conversation_id: str | None = None) -> bool:
+def span_tree(
+    result: Result,
+    tracer: Any = None,
+    *,
+    conversation_id: str | None = None,
+    label: str | None = None,
+) -> bool:
     """Emit a ``gen_ai`` span tree for ``result``. ``True`` if emitted, ``False`` if OTel absent.
 
     Args:
@@ -37,12 +43,16 @@ def span_tree(result: Result, tracer: Any = None, *, conversation_id: str | None
         conversation_id: Optional multi-turn grouping id (e.g. your ``SQLiteSessionStore`` key).
             When set, the root ``agent.run`` span carries it as the ``gen_ai.conversation.id``
             semantic-convention attribute, so a backend can group the runs of one session.
+        label: Optional **short, human-authored** name for this run (e.g. ``"nightly sweep"``),
+            stamped on the root as ``cendor.run.label`` so a monitor can show what a run was *for*.
+            **Never derive it from the prompt** — prompts/tool values stay off spans by design; a
+            label is a deliberate, non-sensitive tag you choose.
 
     ```python
     from cendor.sdk import run
     from cendor.sdk.otel import span_tree
     result = run(agent, "...")
-    span_tree(result, conversation_id="chat-42")   # -> spans exported to your OTel pipeline
+    span_tree(result, conversation_id="chat-42", label="refund triage")  # -> spans to your pipeline
     ```
     """
     try:
@@ -56,21 +66,27 @@ def span_tree(result: Result, tracer: Any = None, *, conversation_id: str | None
         root.set_attribute("cendor.run.id", result.trace_id)
         if conversation_id:
             root.set_attribute("gen_ai.conversation.id", conversation_id)
+        if label:
+            root.set_attribute("cendor.run.label", label)
         root.set_attribute("cendor.run.agents", ",".join(result.agents))
         root.set_attribute("gen_ai.usage.input_tokens", result.usage.input_tokens)
         root.set_attribute("gen_ai.usage.output_tokens", result.usage.output_tokens)
         root.set_attribute("cendor.run.cost_usd", str(result.cost.amount))
 
+        step_no = 0  # 1-based ordinal across the whole run (matches live_spans' cendor.step)
         for agent_name, group in _group_by_agent(result.steps):
             with tracer.start_as_current_span(f"agent {agent_name}") as agent_span:
                 agent_span.set_attribute("gen_ai.operation.name", "invoke_agent")
                 agent_span.set_attribute("gen_ai.agent.name", agent_name)
                 for step in group:
+                    step_no += 1
                     if step.kind == "llm" and isinstance(step.call, LLMCall):
                         with tracer.start_as_current_span(f"chat {step.name}") as s:
                             s.set_attribute("gen_ai.operation.name", "chat")
                             s.set_attribute("gen_ai.system", step.call.provider)
                             s.set_attribute("gen_ai.request.model", step.call.model)
+                            s.set_attribute("gen_ai.agent.name", agent_name)
+                            s.set_attribute("cendor.step", step_no)
                             _set_call_attrs(s, step.call)
                             if step.usage is not None:
                                 s.set_attribute(
@@ -89,6 +105,8 @@ def span_tree(result: Result, tracer: Any = None, *, conversation_id: str | None
                         with tracer.start_as_current_span(f"execute_tool {step.name}") as s:
                             s.set_attribute("gen_ai.operation.name", "execute_tool")
                             s.set_attribute("gen_ai.tool.name", step.name)
+                            s.set_attribute("gen_ai.agent.name", agent_name)
+                            s.set_attribute("cendor.step", step_no)
                             _set_tool_attrs(s, step.call)
     return True
 
@@ -124,7 +142,11 @@ def _set_tool_attrs(span: Any, call: Any) -> None:
 
 @contextmanager
 def live_spans(
-    tracer: Any = None, *, name: str = "agent.run", conversation_id: str | None = None
+    tracer: Any = None,
+    *,
+    name: str = "agent.run",
+    conversation_id: str | None = None,
+    label: str | None = None,
 ) -> Any:
     """Emit ``gen_ai`` spans **live** as a run progresses — the streaming counterpart to
     :func:`span_tree` (which builds the tree post-hoc from a finished ``Result``). Wrap a run:
@@ -132,17 +154,26 @@ def live_spans(
     ```python
     from cendor.sdk import run
     from cendor.sdk.otel import live_spans
-    with live_spans(conversation_id="chat-42"):
+    with live_spans(conversation_id="chat-42", label="refund triage"):
         result = run(agent, "...", session=mem)
     ```
 
     A root ``agent.run`` span brackets the block; a child ``chat {model}`` / ``execute_tool {name}``
     span is emitted the moment each call completes (its start time backdated by the call's
     ``latency_ms`` so the duration is accurate), so a live backend sees the trajectory in real time
-    rather than all at once at the end. Works for single- and multi-agent runs (each span carries a
-    ``cendor.trace_id``). Pass ``conversation_id=`` (e.g. your session/store key) to stamp
-    ``gen_ai.conversation.id`` on the root span so multi-turn runs group as one conversation. A
-    **no-op** (still runs the block) if OpenTelemetry isn't installed.
+    rather than all at once at the end. Each child carries the making agent's ``gen_ai.agent.name``
+    and a 1-based ``cendor.step`` ordinal; the root carries ``cendor.run.id`` / ``cendor.trace_id``
+    (the run's correlation id, learned from the first observed event) and, at close, the run's
+    ``gen_ai.usage.input_tokens`` / ``output_tokens`` and ``cendor.run.cost_usd`` rollups — bringing
+    the live tree to parity with :func:`span_tree`.
+
+    Args:
+        conversation_id: Optional multi-turn grouping id → ``gen_ai.conversation.id`` on the root.
+        label: Optional **short, human-authored** run name → ``cendor.run.label`` on the root, so a
+            monitor shows what a run was *for*. **Never derive it from the prompt** — prompts/tool
+            values stay off spans by design; a label is a deliberate, non-sensitive tag you choose.
+
+    A **no-op** (still runs the block) if OpenTelemetry isn't installed.
     """
     try:
         from opentelemetry import trace as ot
@@ -151,19 +182,41 @@ def live_spans(
         return
 
     import time
+    from decimal import Decimal
 
     from cendor.core import bus
+
+    from ._governance import current_agent
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
     with tracer.start_as_current_span(name) as root:
         root.set_attribute("gen_ai.operation.name", "agent")
         if conversation_id:
             root.set_attribute("gen_ai.conversation.id", conversation_id)
+        if label:
+            root.set_attribute("cendor.run.label", label)
         ctx = ot.set_span_in_context(root)
+        # Rollup/step state accumulated across the run (typed closure vars, mutated via nonlocal).
+        step_no = 0
+        total_input = 0
+        total_output = 0
+        total_cost = Decimal("0")
+        run_id_set = False
 
         def on_event(ev: Any) -> None:
+            nonlocal step_no, total_input, total_output, total_cost, run_id_set
             if not isinstance(ev, (LLMCall, ToolCall)):
                 return
+            trace_id = getattr(ev, "trace_id", "") or ""
+            if not run_id_set and trace_id:
+                # Learn the run/correlation id from the first observed event (the trace() scope is
+                # entered inside run(), after this root span was created), so the Runs board can
+                # filter live runs by id — parity with span_tree's cendor.run.id.
+                root.set_attribute("cendor.run.id", trace_id)
+                root.set_attribute("cendor.trace_id", trace_id)
+                run_id_set = True
+            step_no += 1
+            agent = current_agent()
             end = time.time_ns()
             latency = getattr(ev, "latency_ms", None)
             start = end - int(
@@ -174,22 +227,31 @@ def live_spans(
                 span.set_attribute("gen_ai.operation.name", "chat")
                 span.set_attribute("gen_ai.system", ev.provider)
                 span.set_attribute("gen_ai.request.model", ev.model)
-                span.set_attribute("cendor.trace_id", getattr(ev, "trace_id", ""))
+                span.set_attribute("cendor.trace_id", trace_id)
+                span.set_attribute("cendor.step", step_no)
+                if agent:
+                    span.set_attribute("gen_ai.agent.name", agent)
                 _set_call_attrs(span, ev)
                 if ev.usage is not None:
                     span.set_attribute("gen_ai.usage.input_tokens", ev.usage.input_tokens)
                     span.set_attribute("gen_ai.usage.output_tokens", ev.usage.output_tokens)
+                    total_input += ev.usage.input_tokens
+                    total_output += ev.usage.output_tokens
                     if ev.usage.reasoning_tokens:
                         span.set_attribute(
                             "gen_ai.usage.reasoning_tokens", ev.usage.reasoning_tokens
                         )
                 if ev.cost is not None:
                     span.set_attribute("gen_ai.usage.cost", str(ev.cost.amount))
+                    total_cost += ev.cost.amount
             else:
                 span = tracer.start_span(f"execute_tool {ev.name}", context=ctx, start_time=start)
                 span.set_attribute("gen_ai.operation.name", "execute_tool")
                 span.set_attribute("gen_ai.tool.name", ev.name)
-                span.set_attribute("cendor.trace_id", getattr(ev, "trace_id", ""))
+                span.set_attribute("cendor.trace_id", trace_id)
+                span.set_attribute("cendor.step", step_no)
+                if agent:
+                    span.set_attribute("gen_ai.agent.name", agent)
                 _set_tool_attrs(span, ev)
             span.end(end_time=end)
 
@@ -198,3 +260,7 @@ def live_spans(
             yield
         finally:
             bus.unsubscribe(on_event)
+            # Usage/cost rollups on the root at close — parity with span_tree's finished totals.
+            root.set_attribute("gen_ai.usage.input_tokens", total_input)
+            root.set_attribute("gen_ai.usage.output_tokens", total_output)
+            root.set_attribute("cendor.run.cost_usd", str(total_cost))

@@ -119,8 +119,10 @@ def test_acttrace_guard_signature_pin():
 
 
 def test_tokenguard_budget_config_pin_vs_scope_forwarding():
-    # `_governance._scope` forwards exactly usd (as `max_usd`) + hardcodes on_exceed="block".
-    # Any new budget() field lands here first; decide whether the per-agent path forwards it.
+    # `_governance._scope` forwards usd (as `max_usd`) + hardcodes on_exceed="block", and — since
+    # the V2 emission wave (tokenguard 1.3) — a `name`/`description` identifying the per-agent
+    # ceiling so a block is attributable in a monitor. Any new budget() field lands here first;
+    # decide whether the per-agent path forwards it, and update this pin in the same PR.
     assert list(inspect.signature(tokenguard.budget).parameters) == [
         "usd",
         "tokens",
@@ -129,6 +131,8 @@ def test_tokenguard_budget_config_pin_vs_scope_forwarding():
         "downgrade",
         "output_reserve",
         "reasoning_reserve",
+        "name",
+        "description",
     ]
 
 

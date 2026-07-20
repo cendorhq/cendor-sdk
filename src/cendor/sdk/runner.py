@@ -24,6 +24,7 @@ from cendor.core.types import LLMCall, ToolCall
 
 from . import _guardrails as _gr
 from ._governance import _scope
+from ._governance import current_agent as _current_agent
 from .providers import assistant_message, tool_result_message
 from .resilience import RetryPolicy, acall_with_retry, call_with_retry
 from .result import Result, RunComplete, Step, TextDelta, ToolCallEvent, ToolResultEvent
@@ -53,6 +54,12 @@ def _collector(run_id: str, *, agent_name: str = "", on_step: Any = None) -> Any
 
     def on_bus(ev: Any) -> None:
         if isinstance(ev, (LLMCall, ToolCall)) and getattr(ev, "trace_id", "") == run_id:
+            # G13a: stamp which agent made the call into the event's free metadata dict (core types
+            # untouched). setdefault so a more-specific value set upstream wins; current_agent()
+            # is correct even in multi-agent orchestration (each turn runs under its own _scope).
+            meta = getattr(ev, "metadata", None)
+            if isinstance(meta, dict):
+                meta.setdefault("agent", _current_agent() or agent_name)
             events.append(ev)
             if on_step is not None:
                 try:

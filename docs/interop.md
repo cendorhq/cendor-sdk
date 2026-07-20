@@ -206,10 +206,18 @@ live.close();               // …and stop
 <!-- /tabs -->
 
 Spans carry `gen_ai.request.model`, `gen_ai.system`, `gen_ai.usage.input_tokens` /
-`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`. Pass `conversation_id=`
-(Python) / `{ conversationId }` (TypeScript) — e.g. your session / `SQLiteSessionStore` key — to
-`live_spans` / `span_tree` to stamp `gen_ai.conversation.id` on the root `agent.run` span, so a
-backend can group the runs of one multi-turn conversation.
+`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`. Each child call span also
+carries a 1-based `cendor.step` ordinal, and the root carries `cendor.run.id` plus the run's
+usage/cost rollups — so `live_spans` reads the same as the post-hoc `span_tree`. Pass
+`conversation_id=` (Python) / `{ conversationId }` (TypeScript) — e.g. your session /
+`SQLiteSessionStore` key — to stamp `gen_ai.conversation.id` on the root, so a backend can group
+the runs of one multi-turn conversation.
+
+Pass `label=` (Python) / `{ label }` (TypeScript) to stamp a short, human-authored
+`cendor.run.label` on the root — a monitor can then show *what a run was for* (e.g.
+`"nightly refund sweep"`). **Never derive a label from the prompt:** prompts and tool-argument
+values stay off spans by design (the monitor may be pointed at shared infra); a label is a
+deliberate, non-sensitive tag you choose.
 
 ## Human-in-the-loop — approvals in the audit chain
 
