@@ -13,16 +13,16 @@ from __future__ import annotations
 AS_OF = "2026-07-20"
 
 PYPI: dict[str, str] = {
-    "cendor-core": "1.6.0",
+    "cendor-core": "1.7.0",
     "cendor-tokenguard": "1.3.0",
     "cendor-guardrails": "1.6.0",
     "cendor-contextkit": "1.0.3",
-    "cendor-squeeze": "1.0.3",
+    "cendor-squeeze": "1.1.0",
     "cendor-cassette": "1.0.2",
-    "cendor-acttrace": "1.7.0",
+    "cendor-acttrace": "1.8.0",
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
-    "cendor-sdk": "1.10.0",
+    "cendor-sdk": "1.11.0",
     "cendor-mcp": "0.1.5",
     "cendor-init": "0.2.2",
 }
