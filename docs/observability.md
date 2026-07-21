@@ -52,6 +52,12 @@ conversation. That grouping is exactly what Cendor Monitor drills as **Agents �
 Add a human-authored `label=` (never derived from the prompt) to stamp `cendor.run.label` so a
 monitor can show *what a run was for*.
 
+Streamed calls carry `cendor.ttft_ms` (time-to-first-token) on the `chat` span, and — when the
+provider reported no usage on the stream so the tokens were recovered by an offline estimate —
+`cendor.usage_estimated="true"`, so a monitor shows those counts as *est.* rather than exact (truth =
+the product). The run root carries `cendor.run.agents` so a monitor's Agents view fills for
+live-streamed runs too.
+
 ## Watch it in Cendor Monitor
 
 [**Cendor Monitor**](/docs/monitor) is the optional, self-hosted monitor that renders these SDK runs

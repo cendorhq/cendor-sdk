@@ -173,6 +173,16 @@ def _set_call_attrs(span: Any, call: Any) -> None:
         span.set_attribute("gen_ai.response.finish_reason", str(finish))
     if meta.get("streamed"):
         span.set_attribute("gen_ai.response.streamed", True)
+    # G-V4-1: time-to-first-token, recovered on the first streamed chunk (instrument() records it in
+    # call.metadata). Stamping it here brings governed journeys (span_tree + live_spans) to parity
+    # with the libs-only span emitter, so TTFT shows on real SDK workloads, not just bare streams.
+    ttft = meta.get("ttft_ms")
+    if ttft is not None:
+        span.set_attribute("cendor.ttft_ms", ttft)
+    # G-V4-3: streamed token counts estimated offline (no provider usage on the stream) are flagged
+    # so a monitor renders them as "est." — truth = the product. String "true", only when set.
+    if meta.get("usage_estimated"):
+        span.set_attribute("cendor.usage_estimated", "true")
     err = meta.get("error")
     if err:
         span.set_attribute("error", True)
@@ -256,6 +266,7 @@ def live_spans(
         total_cost = Decimal("0")
         run_id_set = False
         conv_set = bool(conversation_id)
+        agents_seen: dict[str, None] = {}  # ordered-unique agent names → cendor.run.agents (G-V4-2)
 
         def on_event(ev: Any) -> None:
             nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set
@@ -278,6 +289,8 @@ def live_spans(
                     conv_set = True
             step_no += 1
             agent = current_agent()
+            if agent:
+                agents_seen.setdefault(agent, None)  # G-V4-2: collect participants for the root
             end = time.time_ns()
             latency = getattr(ev, "latency_ms", None)
             start = end - int(
@@ -332,3 +345,6 @@ def live_spans(
             root.set_attribute("gen_ai.usage.input_tokens", total_input)
             root.set_attribute("gen_ai.usage.output_tokens", total_output)
             root.set_attribute("cendor.run.cost_usd", str(total_cost))
+            # G-V4-2: stamp the run's agents on the root (span_tree already does this from
+            # result.agents) so the runs-list Agents column fills for live-streamed runs too.
+            root.set_attribute("cendor.run.agents", ",".join(agents_seen))

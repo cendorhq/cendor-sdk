@@ -4,6 +4,14 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] — 2026-07-21
+Emission truth on governed journeys — TTFT, estimated-usage, and run.agents on the SDK span paths (Monitor v5 G-V4-1/2/3). Additive; a monitor renders these, nothing changes for a run that doesn't stream or governs no agents.
+
+### Added
+- **TTFT inside a governed journey (G-V4-1).** `span_tree` and `live_spans` now stamp `cendor.ttft_ms` on a streamed `chat` span (recovered on the first chunk by `instrument()`), so time-to-first-token shows on real SDK workloads — previously only a bare libs-only streamed call carried it.
+- **Estimated-usage provenance (G-V4-3).** When a streamed call reported no usage and the token count was recovered by offline estimate, the `chat` span carries `cendor.usage_estimated="true"` — truth = the product, so a monitor shows those tokens as *est.* rather than exact. Stamped only when set.
+- **Run agents on the live root (G-V4-2).** `live_spans` accumulates the participating agents and stamps `cendor.run.agents` on the `agent.run` root at close, reaching parity with the post-hoc `span_tree` (so a monitor's Agents view fills for live-streamed runs too).
+
 ## [1.11.0] — 2026-07-20
 Opt-in content on the run spans + auto session grouping — the SDK half of the Cendor journey console (Monitor v3). Backward-compatible (additive); content stays OFF unless you opt in with `cendor.core.otel.capture_content()`.
 

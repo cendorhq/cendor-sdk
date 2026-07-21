@@ -206,9 +206,13 @@ live.close();               // …and stop
 <!-- /tabs -->
 
 Spans carry `gen_ai.request.model`, `gen_ai.system`, `gen_ai.usage.input_tokens` /
-`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`. Each child call span also
-carries a 1-based `cendor.step` ordinal, and the root carries `cendor.run.id` plus the run's
-usage/cost rollups — so `live_spans` reads the same as the post-hoc `span_tree`. Pass
+`output_tokens`, `gen_ai.usage.cost`, and per-agent `gen_ai.agent.name`. A streamed call's `chat`
+span also carries `cendor.ttft_ms` (time-to-first-token, recovered on the first chunk) and, when the
+provider reported no usage on the stream so the count was recovered by an offline estimate,
+`cendor.usage_estimated="true"` (truth = the product — a monitor renders those tokens as *est.*
+rather than exact). Each child call span carries a 1-based `cendor.step` ordinal, and the root
+carries `cendor.run.id`, `cendor.run.agents`, plus the run's usage/cost rollups — so `live_spans`
+reads the same as the post-hoc `span_tree`. Pass
 `conversation_id=` (Python) / `{ conversationId }` (TypeScript) — e.g. your session /
 `SQLiteSessionStore` key — to stamp `gen_ai.conversation.id` on the root, so a backend can group
 the runs of one multi-turn conversation.

@@ -184,3 +184,100 @@ def test_span_tree_step_and_label(build):  # G13 (span_tree) + G14
     assert span_tree(result, tracer=tracer) is True
     root2 = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
     assert "cendor.run.label" not in root2.attributes
+
+
+# ---------------------------------------------------------------- V5: emission truth (G-V4-1/2/3)
+
+
+def _stream_client(turns):
+    """Instrument a fake OpenAI client whose create() returns streamed chunk iterators."""
+    from types import SimpleNamespace
+
+    from cendor.core import instrument
+
+    it = iter(turns)
+
+    class Completions:
+        def create(self, **kwargs):
+            return next(it)
+
+    return instrument(SimpleNamespace(chat=SimpleNamespace(completions=Completions())))
+
+
+def _text_chunk(content=None, finish=None):
+    """A streamed OpenAI chunk with NO usage — so the finalizer estimates usage offline
+    (sets metadata['usage_estimated']) and records TTFT on the first chunk."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                delta=SimpleNamespace(content=content, tool_calls=None), finish_reason=finish
+            )
+        ],
+        usage=None,
+    )
+
+
+def test_live_spans_streamed_chat_carries_ttft_and_estimated():  # G-V4-1 + G-V4-3
+    tracer, exporter = _mem_tracer()
+    client = _stream_client(
+        [iter([_text_chunk("Hi "), _text_chunk("there"), _text_chunk(None, finish="stop")])]
+    )
+    agent = Agent(name="assistant", model="gpt-4o", instructions="x", client=client)
+    with live_spans(tracer=tracer):
+        list(run.stream(agent, "hi"))
+    chat = next(s for s in exporter.get_finished_spans() if s.name.startswith("chat "))
+    # G-V4-1: TTFT inside a governed journey (previously only the libs-only emitter carried it).
+    assert "cendor.ttft_ms" in chat.attributes
+    assert chat.attributes["cendor.ttft_ms"] >= 0
+    # G-V4-3: the streamed count was estimated (no provider usage) — flagged as a string.
+    assert chat.attributes["cendor.usage_estimated"] == "true"
+
+
+def test_span_tree_streamed_chat_carries_ttft_and_estimated():  # G-V4-1 + G-V4-3 (post-hoc path)
+    tracer, exporter = _mem_tracer()
+    client = _stream_client(
+        [iter([_text_chunk("Hi "), _text_chunk("there"), _text_chunk(None, finish="stop")])]
+    )
+    agent = Agent(name="assistant", model="gpt-4o", instructions="x", client=client)
+    result = list(run.stream(agent, "hi"))[-1].result
+    assert span_tree(result, tracer=tracer) is True
+    chat = next(s for s in exporter.get_finished_spans() if s.name.startswith("chat "))
+    assert "cendor.ttft_ms" in chat.attributes
+    assert chat.attributes["cendor.usage_estimated"] == "true"
+
+
+def test_non_streamed_chat_has_no_estimated_flag(build):  # G-V4-3 negative
+    tracer, exporter = _mem_tracer()
+    agent = Agent(name="a", model="gpt-4o", instructions="hi")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(return_value=build.resp(build.openai_chat("hi")))
+        with live_spans(tracer=tracer):
+            run(agent, "hi")
+    chat = next(s for s in exporter.get_finished_spans() if s.name.startswith("chat "))
+    assert "cendor.usage_estimated" not in chat.attributes  # real usage => no est. flag
+    assert "cendor.ttft_ms" not in chat.attributes  # not a streamed call
+
+
+def test_live_spans_root_carries_run_agents(build):  # G-V4-2
+    tracer, exporter = _mem_tracer()
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], instructions="Use tools.")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(
+            side_effect=[
+                build.resp(
+                    build.openai_chat(
+                        None,
+                        finish="tool_calls",
+                        tool_calls=[build.openai_tool_call("get_weather", {"city": "Paris"})],
+                    )
+                ),
+                build.resp(build.openai_chat("It's sunny in Paris.")),
+            ]
+        )
+        with live_spans(tracer=tracer):
+            run(agent, "weather in Paris?")
+    root = next(s for s in exporter.get_finished_spans() if s.name == "agent.run")
+    # parity with span_tree: the run's agents on the root fill the runs-list Agents column.
+    assert root.attributes["cendor.run.agents"] == "assistant"
