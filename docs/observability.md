@@ -5,7 +5,7 @@ A governed `run` is the richest thing Cendor emits: a full **`gen_ai` span tree*
 cost, latency, and (opt-in) content. Because it's **standard OpenTelemetry** — one wire, no
 Cendor-specific exporter, never a Cendor endpoint — where it goes is your choice: **your own backend**
 (Azure Monitor, CloudWatch, Datadog, Langfuse, any OTLP) for production — or **Cendor Monitor**, a
-free, self-hosted **journey console**, when you want to *see* a run in one screen. Same wire either
+free, self-hosted **journey view**, when you want to *see* a run in one screen. Same wire either
 way; your own backend stays the documented production default.
 
 > The full backend catalogue, the emitter reference, and content-capture details live on the
@@ -54,7 +54,7 @@ monitor can show *what a run was for*.
 
 ## Watch it in Cendor Monitor
 
-[**Cendor Monitor**](/docs/monitor) is the optional, self-hosted console that renders these SDK runs
+[**Cendor Monitor**](/docs/monitor) is the optional, self-hosted monitor that renders these SDK runs
 as a **run journey**: the whole conversation with tokens, cost, latency, and TTFT per step, and the
 exact step where a budget block, guardrail verdict, or compression fired — inline. One `docker run`,
 on your own infrastructure:
@@ -73,7 +73,7 @@ it, and your own OTel backend stays the production default. Full page: [Cendor M
 - **Content is opt-in, off by default.** Prompts/responses/thinking/tool values ride the wire only
   after you call `otel.capture_content()` (see the [libraries guide](/docs/observability#content-capture--opt-in-off-by-default)).
   A monitor never enables it for you.
-- **The console is an operational copy — not the evidence.** `verify()` runs on the tamper-evident
-  audit **file** on your app host, never on telemetry or on what a console shows.
+- **The monitor is an operational copy — not the evidence.** `verify()` runs on the tamper-evident
+  audit **file** on your app host, never on telemetry or on what a monitor shows.
 - **Cendor never operates a telemetry endpoint.** You configure the pipeline; Cendor exports into the
   global OTel provider you own. Local-first, no server required to run the SDK itself.
