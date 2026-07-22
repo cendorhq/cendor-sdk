@@ -71,6 +71,39 @@ def test_live_spans_emitted_under_a_run_span(build):
     assert chat.end_time <= root.end_time
 
 
+def test_live_spans_audit_entries_correlate_to_the_run(build):
+    """Governance→run linkage (G-LINK-2 parity): inside live_spans(), an AuditLog(mirror=OTelMirror)
+    audit entry carries otel_trace_id == the run root's trace AND run_id == result.trace_id, and the
+    audit.* mirror span nests in the run's trace. Python already activates its run root
+    (start_as_current_span) — which also sets the GLOBAL span context that acttrace's
+    _with_otel_ids reads — so this pins that the TS port must not silently diverge."""
+    from cendor.acttrace import AuditLog, OTelMirror
+
+    tracer, exporter = _mem_tracer()
+    agent = Agent(name="assistant", model="gpt-4o", instructions="Answer.")
+    # Route the mirror's spans to the same exporter (its default tracer would use the global no-op
+    # provider); the active-span context that _with_otel_ids reads is global regardless of provider.
+    audit = AuditLog(system="assistant", mirror=OTelMirror(tracer=tracer))
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(side_effect=[build.resp(build.openai_chat("Hello."))])
+        with live_spans(tracer=tracer):
+            result = run(agent, "hi")
+    audit.detach()
+
+    spans = exporter.get_finished_spans()
+    root = next(s for s in spans if s.name == "agent.run")
+    run_trace = format(root.get_span_context().trace_id, "032x")
+
+    llm = next(e for e in audit.entries if e.type == "llm_call")
+    assert llm.payload["otel_trace_id"] == run_trace  # active-span correlation
+    assert llm.payload["run_id"] == result.trace_id  # ambient run-id fallback (G-LINK-2)
+
+    audit_spans = [s for s in spans if s.name.startswith("audit.")]
+    assert any(
+        format(s.get_span_context().trace_id, "032x") == run_trace for s in audit_spans
+    )  # audit.* mirror span nests in the run trace, not an orphan
+
+
 def test_live_spans_never_breaks_a_run(build):
     # With no explicit tracer (global no-op provider in tests) it must still just run the block.
     agent = Agent(name="a", model="gpt-4o", instructions="hi")
