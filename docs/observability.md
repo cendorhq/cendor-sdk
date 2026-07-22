@@ -58,6 +58,16 @@ provider reported no usage on the stream so the tokens were recovered by an offl
 the product). The run root carries `cendor.run.agents` so a monitor's Agents view fills for
 live-streamed runs too.
 
+## Governance links back to the run
+
+Inside `live_spans()` / `liveSpans` (`@cendor/sdk` ≥ 1.12 / 0.17), the run's root span is the active
+context span for the whole run, so every governance event your run produces — a budget block, a
+guardrail verdict, a tool call, an audit `decision` — correlates to that run's trace (`@cendor/acttrace`
+stamps `cendor.audit.otel_trace_id`, and the `audit.*` mirror spans nest in the run's trace). A run
+built post-hoc from `span_tree` instead still links by `cendor.audit.run_id` (Cendor's ambient run
+id). So a trace-aware tool such as Cendor Monitor can open a run and show every verdict on the exact
+step it governed — see [Correlate audit entries with your traces](/docs/observability#correlate-audit-entries-with-your-traces).
+
 ## Watch it in Cendor Monitor
 
 [**Cendor Monitor**](/docs/monitor) is the optional, self-hosted monitor that renders these SDK runs
@@ -66,7 +76,7 @@ exact step where a budget block, guardrail verdict, or compression fired — inl
 on your own infrastructure:
 
 ```bash
-docker run --rm -p 3000:3000 -p 4317:4317 -p 4318:4318 ghcr.io/cendorhq/cendor-monitor:0.5.0
+docker run --rm -p 3000:3000 -p 4317:4317 -p 4318:4318 ghcr.io/cendorhq/cendor-monitor:0.6.0
 # then, in your app:  OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318   → open http://localhost:3000
 ```
 
