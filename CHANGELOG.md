@@ -4,6 +4,20 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] — 2026-07-22
+Wire the SDK onto the `cendor-core` ambient seam, harden `live_spans`, isolate streaming contexts, and add streamed thinking deltas.
+
+### Fixed
+- **Stream context isolation (GLR-9):** the streaming runners (`run.stream` / `run.astream`, single- and multi-agent) no longer leak the run's scopes (trace / attribution / budget / audit / collector) into the consumer between deltas. A consumer's own instrumented call made between two streamed events is no longer misattributed to the run (it was appended to `Result.steps`, counted against the run's budget, chained under its audit decision, and rendered as a live span). Sync streams advance inside a copied context; async streams relay through a producer task + queue (the design the TypeScript port always had). One behavior note: ambient scopes are captured **when the stream is created**, not re-read live per advance.
+
+### Added
+- **`ThinkingDelta` (GLR-12):** a new additive `run.stream` event surfacing streamed reasoning text for providers that stream it (Ollama `think` models; OpenAI-compatible `reasoning_content`), kept separate from `TextDelta`. Additive — a consumer that doesn't handle it is unaffected.
+
+### Changed
+- **`live_spans` (GLR-2/3):** reads the agent + conversation id from the event's stamped metadata (so they survive an out-of-scope streamed delivery), and renders only the observed run family — a concurrent run sharing the process bus no longer pollutes its steps / rollups / children.
+- **RAG in scope (GLR-4):** for a fresh (non-resumed) `run()`, a retriever's embedding call is now attributed to the run (a collected step, trace-stamped, budgeted) instead of firing before the run opened.
+- Requires `cendor-core >= 1.9`, `cendor-tokenguard >= 1.4`, `cendor-acttrace >= 1.10`, `cendor-cassette >= 1.1` (the ambient-seam shelf).
+
 ## [1.12.0] — 2026-07-21
 Emission truth on governed journeys — TTFT, estimated-usage, and run.agents on the SDK span paths (Monitor v5 G-V4-1/2/3). Additive; a monitor renders these, nothing changes for a run that doesn't stream or governs no agents.
 

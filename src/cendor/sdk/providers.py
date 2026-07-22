@@ -481,6 +481,11 @@ class Provider:
         """The text delta carried by one streamed chunk (``""`` if none)."""
         return ""
 
+    def stream_thinking(self, chunk: Any) -> str:
+        """GLR-12: the reasoning/thinking delta carried by one streamed chunk, or ``""`` when the
+        provider doesn't stream thinking. Kept separate from :meth:`stream_text`."""
+        return ""
+
     def parse_stream(self, chunks: list) -> ParsedResponse:
         """Reassemble a full :class:`ParsedResponse` (content + tool calls) from streamed chunks."""
         raise NotImplementedError
@@ -571,6 +576,12 @@ class OpenAIChatProvider(Provider):
     def stream_text(self, chunk: Any) -> str:
         choice = _first(_get(chunk, "choices"))
         return str(_get(_get(choice, "delta"), "content", "") or "")
+
+    def stream_thinking(self, chunk: Any) -> str:
+        # GLR-12: OpenAI-compatible reasoning models (e.g. DeepSeek-R1 via the OpenAI SDK) stream
+        # reasoning text on `delta.reasoning_content`. Standard OpenAI chat carries none → "".
+        choice = _first(_get(chunk, "choices"))
+        return str(_get(_get(choice, "delta"), "reasoning_content", "") or "")
 
     def parse_stream(self, chunks: list) -> ParsedResponse:
         """Accumulate Chat Completions deltas: content is concatenated; tool calls are reassembled
@@ -1188,6 +1199,10 @@ class OllamaProvider(Provider):
 
     def stream_text(self, chunk: Any) -> str:
         return str(_get(_get(chunk, "message"), "content", "") or "")
+
+    def stream_thinking(self, chunk: Any) -> str:
+        # GLR-12: Ollama `think` models stream reasoning on `message.thinking`.
+        return str(_get(_get(chunk, "message"), "thinking", "") or "")
 
     def parse_stream(self, chunks: list) -> ParsedResponse:
         """Accumulate Ollama chat chunks: content deltas concatenated; tool calls arrive whole on

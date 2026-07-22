@@ -106,6 +106,7 @@ from .result import (
     Step,
     StreamEvent,
     TextDelta,
+    ThinkingDelta,
     ToolCallEvent,
     ToolResultEvent,
 )
@@ -173,6 +174,7 @@ __all__ = [
     # streaming events (run.stream / run.astream)
     "StreamEvent",
     "TextDelta",
+    "ThinkingDelta",
     "ToolCallEvent",
     "ToolResultEvent",
     "RunComplete",

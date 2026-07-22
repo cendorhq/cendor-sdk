@@ -98,15 +98,20 @@ def build():
 
 @pytest.fixture(autouse=True)
 def _isolate():
-    """Reset shared global state between tests: tokenguard records/budgets + the client cache."""
+    """Reset shared global state between tests: tokenguard records/budgets, the client cache, and
+    acttrace's global detector list (``rules.entropy`` etc. register a detector into it, which would
+    otherwise leak into a later test and redact high-entropy strings like an otel trace id)."""
     import cendor.tokenguard as tg
+    from cendor.acttrace.detectors import DETECTORS
 
     from cendor.sdk import providers
 
     tg.reset()
+    detectors_snapshot = list(DETECTORS)
     providers._client_cache.clear()
     providers._placeholder_hints.clear()
     yield
     tg.reset()
+    DETECTORS[:] = detectors_snapshot  # drop any detector a test registered globally
     providers._client_cache.clear()
     providers._placeholder_hints.clear()

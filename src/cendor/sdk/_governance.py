@@ -42,6 +42,28 @@ def current_conversation() -> str:
     return _active_conversation.get()
 
 
+def _sdk_ambient(_event: Any) -> dict[str, Any] | None:
+    """GLR-2 ambient provider: stamp the active agent + conversation id onto every LLMCall/ToolCall
+    at construction (the caller's synchronous frame), so ``live_spans`` (and any subscriber) reads
+    them from the event even when it is delivered outside the run scope — a stream finalized after
+    the scope exits, or a consumer call after a Python stream generator leaked+restored scopes.
+    Non-empty keys only; core's never-overwrite seam keeps any explicit value."""
+    out: dict[str, Any] = {}
+    agent = _active_agent.get()
+    if agent:
+        out["agent"] = agent
+    conversation = _active_conversation.get()
+    if conversation:
+        out["conversation_id"] = conversation
+    return out or None
+
+
+# Register once at module load (idempotent). Importing cendor.sdk wires this.
+from cendor.core import add_ambient_provider as _add_ambient_provider  # noqa: E402
+
+_add_ambient_provider(_sdk_ambient)
+
+
 @contextmanager
 def _conversation_scope(session: Any) -> Any:
     """Set the ambient conversation id from a session's key for the duration of a run (G19). No-op

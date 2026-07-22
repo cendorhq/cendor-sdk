@@ -266,29 +266,39 @@ def live_spans(
         total_cost = Decimal("0")
         run_id_set = False
         conv_set = bool(conversation_id)
+        family = ""  # the run-family root, learned from the first event (GLR-3)
         agents_seen: dict[str, None] = {}  # ordered-unique agent names → cendor.run.agents (G-V4-2)
 
         def on_event(ev: Any) -> None:
-            nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set
+            nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set, family
             if not isinstance(ev, (LLMCall, ToolCall)):
                 return
             trace_id = getattr(ev, "trace_id", "") or ""
             if not run_id_set and trace_id:
-                # Learn the run/correlation id from the first observed event (the trace() scope is
-                # entered inside run(), after this root span was created), so the Runs board can
-                # filter live runs by id — parity with span_tree's cendor.run.id.
-                root.set_attribute("cendor.run.id", trace_id)
-                root.set_attribute("cendor.trace_id", trace_id)
+                # Learn the run-family root from the first observed event: the segment before the
+                # first ":" (orchestration segments are ``{parent}:{agent}#{seg}``; a single-agent
+                # run is the bare run id) — matches the collector's match + the monitor's key.
+                family = trace_id.split(":", 1)[0]
+                root.set_attribute("cendor.run.id", family)
+                root.set_attribute("cendor.trace_id", family)
                 run_id_set = True
+            # GLR-3: render only events from THIS run family — a concurrent run sharing the process
+            # bus must not pollute this run's steps / rollups / children.
+            if family and trace_id != family and not trace_id.startswith(family + ":"):
+                return
             if not conv_set:
-                # G19: learn the conversation id the runner propagated from the session key (no
-                # explicit arg was passed). Only a real key is used, never synthesized.
-                cid = current_conversation()
+                # G19: prefer the conversation id stamped on the event at construction (GLR-2 —
+                # survives an out-of-scope delivery), else the ambient scope. Only a real key.
+                cid = (getattr(ev, "metadata", None) or {}).get(
+                    "conversation_id"
+                ) or current_conversation()
                 if cid:
                     root.set_attribute("gen_ai.conversation.id", cid)
                     conv_set = True
             step_no += 1
-            agent = current_agent()
+            # Agent: the ambient current agent (in scope), falling back to the event's stamped
+            # metadata (GLR-2 — correct even for an out-of-scope streamed delivery).
+            agent = current_agent() or (getattr(ev, "metadata", None) or {}).get("agent") or ""
             if agent:
                 agents_seen.setdefault(agent, None)  # G-V4-2: collect participants for the root
             end = time.time_ns()

@@ -144,6 +144,18 @@ class TextDelta:
 
 
 @dataclass
+class ThinkingDelta:
+    """A chunk of streamed **thinking / reasoning** text (GLR-12), yielded from ``run.stream`` only
+    for providers that stream reasoning as it is produced (Ollama ``think`` models;
+    OpenAI-compatible endpoints that stream ``reasoning_content``). Additive: providers that don't
+    stream thinking emit none, and a consumer matching on the event type that doesn't handle
+    ``ThinkingDelta`` is unaffected. Kept separate from :class:`TextDelta` (the visible answer) so a
+    UI can render or hide reasoning independently."""
+
+    text: str
+
+
+@dataclass
 class ToolCallEvent:
     """The model asked to call a tool (emitted before the tool runs)."""
 
@@ -168,4 +180,4 @@ class RunComplete:
 
 
 #: The union of events a streamed run yields.
-StreamEvent = TextDelta | ToolCallEvent | ToolResultEvent | RunComplete
+StreamEvent = TextDelta | ThinkingDelta | ToolCallEvent | ToolResultEvent | RunComplete

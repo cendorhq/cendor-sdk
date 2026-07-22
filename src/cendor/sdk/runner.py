@@ -14,8 +14,8 @@ import inspect
 import json
 import re
 import uuid
-from contextlib import contextmanager
-from contextvars import ContextVar
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar, copy_context
 from dataclasses import is_dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -27,7 +27,15 @@ from ._governance import _conversation_scope, _scope
 from ._governance import current_agent as _current_agent
 from .providers import assistant_message, tool_result_message
 from .resilience import RetryPolicy, acall_with_retry, call_with_retry
-from .result import Result, RunComplete, Step, TextDelta, ToolCallEvent, ToolResultEvent
+from .result import (
+    Result,
+    RunComplete,
+    Step,
+    TextDelta,
+    ThinkingDelta,
+    ToolCallEvent,
+    ToolResultEvent,
+)
 
 if TYPE_CHECKING:
     from .agent import Agent
@@ -356,8 +364,14 @@ def run_agent_sync(
     on_turn: Any = None,
     on_step: Any = None,
     guardrails: list | None = None,
+    prepare: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
     """Run one agent's turns over ``messages`` (mutated in place).
+
+    ``prepare`` (GLR-4): when set, a zero-arg callable that produces the starting messages, run
+    **inside** the collector + ``trace(run_id)`` scope, so a retriever's embed call is attributed
+    to the run (a collected step, trace-stamped, budgeted) rather than firing before the run opened.
+    Its result is appended into ``messages`` (kept empty by the caller for a fresh run).
 
     Returns ``(output, steps, switched)`` — ``switched`` is a handoff target name if the agent
     transferred control, else ``None``. ``retry`` retries transient model calls; ``on_turn`` (if
@@ -376,11 +390,14 @@ def run_agent_sync(
     output: Any = None
     switched: str | None = None
 
-    with (
-        _collector(run_id, agent_name=agent.name, on_step=on_step) as events,
-        trace(run_id),
-        _decision(audit, agent, messages, run_id),
-    ):
+    with ExitStack() as _stack:
+        events = _stack.enter_context(_collector(run_id, agent_name=agent.name, on_step=on_step))
+        _stack.enter_context(trace(run_id))
+        if (
+            prepare is not None
+        ):  # GLR-4: RAG embed attributed (collected + trace-stamped + budgeted)
+            messages.extend(prepare())
+        _stack.enter_context(_decision(audit, agent, messages, run_id))
         _gr.gate_input_sync(gl, agent, messages, run_id)  # pre-spend: block raises, redact rewrites
         reasks_left = _gr.effective_reasks(agent, None)
         for _turn in range(turns):
@@ -445,8 +462,9 @@ async def run_agent_async(
     on_step: Any = None,
     guardrails: list | None = None,
     guardrail_mode: str | None = None,
+    prepare: Any = None,
 ) -> tuple[Any, list[Step], str | None]:
-    """Async counterpart of :func:`run_agent_sync`.
+    """Async counterpart of :func:`run_agent_sync` (see ``prepare`` there — GLR-4).
 
     With ``guardrail_mode="parallel"`` the input-stage guardrails run **concurrently with the first
     model call** instead of before it (OpenAI-parity): their latency hides behind the call on the
@@ -466,11 +484,14 @@ async def run_agent_async(
     output: Any = None
     switched: str | None = None
 
-    with (
-        _collector(run_id, agent_name=agent.name, on_step=on_step) as events,
-        trace(run_id),
-        _decision(audit, agent, messages, run_id),
-    ):
+    with ExitStack() as _stack:
+        events = _stack.enter_context(_collector(run_id, agent_name=agent.name, on_step=on_step))
+        _stack.enter_context(trace(run_id))
+        if (
+            prepare is not None
+        ):  # GLR-4: RAG embed attributed (collected + trace-stamped + budgeted)
+            messages.extend(prepare())
+        _stack.enter_context(_decision(audit, agent, messages, run_id))
         gate_task = None
         if mode == "parallel":  # overlap the input gate with the first model call
             gate_task = _gr.start_input_gate_async(gl, agent, messages, run_id)
@@ -624,20 +645,26 @@ class Runner:
         self.guardrails = guardrails  # per-run override; None ⇒ use the agent's own list
         self.guardrail_mode = guardrail_mode  # per-run override; None ⇒ use the agent's own mode
 
-    def _start(self, input: Any) -> tuple[list[dict], str, Any]:
-        """Resolve starting messages (resuming from a checkpoint if one is unfinished)."""
+    def _start(self, input: Any) -> tuple[list[dict], str, Any, Any]:
+        """Resolve starting messages (resuming from a checkpoint if one is unfinished).
+
+        GLR-4: for a fresh run, messages are prepared **inside** the run scopes (so a retriever's
+        embed is attributed) — return an empty list to fill + a ``prepare`` thunk; a resume already
+        carries its messages (``prepare`` is ``None``)."""
         resume = self.checkpoint.resumable_messages() if self.checkpoint else None
         if resume is not None:
-            messages = resume
+            messages: list[dict] = resume
+            prepare = None
         else:
-            messages = _prepare_messages(self.agent, input, self.session)
+            messages = []
+            prepare = lambda: _prepare_messages(self.agent, input, self.session)  # noqa: E731
         run_id = uuid.uuid4().hex
 
         def on_turn(msgs: list[dict]) -> None:
             if self.checkpoint is not None:
                 self.checkpoint.save({"run_id": run_id, "messages": msgs, "done": False})
 
-        return messages, run_id, (on_turn if self.checkpoint is not None else None)
+        return messages, run_id, (on_turn if self.checkpoint is not None else None), prepare
 
     def _resumed_result(self, state: dict) -> Result:
         """Reconstruct a completed :class:`Result` from a finished (``done``) checkpoint.
@@ -680,7 +707,7 @@ class Runner:
         done = self.checkpoint.finished() if self.checkpoint else None
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
             return self._resumed_result(done)
-        messages, run_id, on_turn = self._start(input)
+        messages, run_id, on_turn, prepare = self._start(input)
         with _gr.collecting():  # collect decisions for Result.guardrail_decisions
             with _conversation_scope(self.session):  # G19: propagate the session key to live_spans
                 with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight)
@@ -694,6 +721,7 @@ class Runner:
                         on_turn=on_turn,
                         on_step=self.on_step,
                         guardrails=self.guardrails,
+                        prepare=prepare,
                     )
             return self._finish(run_id, output, steps, messages)
 
@@ -701,7 +729,7 @@ class Runner:
         done = self.checkpoint.finished() if self.checkpoint else None
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
             return self._resumed_result(done)
-        messages, run_id, on_turn = self._start(input)
+        messages, run_id, on_turn, prepare = self._start(input)
         with _gr.collecting():  # collect decisions for Result.guardrail_decisions
             with _conversation_scope(self.session):  # G19: propagate the session key to live_spans
                 with _scope(self.agent):  # attribute spend + enforce agent.max_usd (pre-flight)
@@ -716,6 +744,7 @@ class Runner:
                         on_step=self.on_step,
                         guardrails=self.guardrails,
                         guardrail_mode=self.guardrail_mode,
+                        prepare=prepare,
                     )
             return self._finish(run_id, output, steps, messages)
 
@@ -775,6 +804,9 @@ def stream_agent_sync(
                 buffered, checked = "", 0
                 for chunk in create(**{**kwargs, "stream": True}):
                     chunks.append(chunk)
+                    thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
+                    if thinking:
+                        yield ThinkingDelta(thinking)
                     delta = provider.stream_text(chunk)
                     if delta:
                         yield TextDelta(delta)
@@ -868,6 +900,9 @@ async def stream_agent_async(
                 stream = await create(**{**kwargs, "stream": True})
                 async for chunk in stream:
                     chunks.append(chunk)
+                    thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
+                    if thinking:
+                        yield ThinkingDelta(thinking)
                     delta = provider.stream_text(chunk)
                     if delta:
                         yield TextDelta(delta)
@@ -973,6 +1008,9 @@ def stream_agents_sync(
                     chunks: list = []
                     for chunk in create(**{**kwargs, "stream": True}):
                         chunks.append(chunk)
+                        thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
+                        if thinking:
+                            yield ThinkingDelta(thinking)
                         delta = provider.stream_text(chunk)
                         if delta:
                             yield TextDelta(delta)
@@ -1077,6 +1115,9 @@ async def stream_agents_async(
                     stream = await create(**{**kwargs, "stream": True})
                     async for chunk in stream:
                         chunks.append(chunk)
+                        thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
+                        if thinking:
+                            yield ThinkingDelta(thinking)
                         delta = provider.stream_text(chunk)
                         if delta:
                             yield TextDelta(delta)
@@ -1122,6 +1163,64 @@ async def stream_agents_async(
             guardrail_decisions=list(run_decisions),
         )
     )
+
+
+# ------------------------------------------------------------------- stream isolation (GLR-9)
+
+
+def _drive_sync(ctx: Any, gen: Any) -> Any:
+    """GLR-9: advance a scoped stream generator inside a **copied context**, yielding each event out
+    in the consumer's own context. The run scopes (`trace`/`track`/budget/audit/collector) that the
+    inner generator enters in its body therefore live in ``ctx``, never leaking into the consumer
+    between deltas — so a consumer's own instrumented call between two events is NOT attributed to
+    the run. Abandonment closes the inner generator inside ``ctx``, so its scopes unwind there."""
+    try:
+        while True:
+            try:
+                ev = ctx.run(next, gen)
+            except StopIteration:
+                return
+            yield ev
+    finally:
+        ctx.run(gen.close)
+
+
+async def _drive_async(agen: Any) -> Any:
+    """GLR-9 (async): run the scoped async generator on a background ``asyncio.Task`` (whose context
+    is a ``copy_context()`` snapshot taken at task creation — so user-opened cassette/track/OTel
+    scopes propagate IN), relaying its events through a queue that the public async generator drains
+    **outside** every run scope. The scoped body's contextvar sets stay confined to the producer
+    task; the consumer never sees them between deltas. Mirrors the TS producer+queue design."""
+    import asyncio
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def _producer() -> None:
+        try:
+            async for ev in agen:
+                await queue.put(("item", ev))
+        except BaseException as exc:  # noqa: BLE001 - relay to the consumer, don't crash the task
+            await queue.put(("error", exc))
+        else:
+            await queue.put(("done", None))
+
+    task = asyncio.ensure_future(_producer())  # Task creation snapshots the current context
+    try:
+        while True:
+            kind, payload = await queue.get()
+            if kind == "item":
+                yield payload
+            elif kind == "error":
+                raise payload
+            else:  # "done"
+                return
+    finally:
+        if not task.done():
+            task.cancel()
+        try:
+            await task
+        except BaseException:  # noqa: BLE001 - cancellation / producer teardown is best-effort
+            pass
 
 
 # --------------------------------------------------------------------------- run() entrypoint
@@ -1249,11 +1348,16 @@ class _Run:
         """Stream a run as events (sync generator). Terminal event is ``RunComplete`` carrying the
         ``Result``. A single agent streams its turns; a list streams a multi-agent handoff run,
         switching active agents on a ``transfer_to_<peer>`` call — one terminal ``RunComplete``."""
+        # GLR-9: copy the caller's context ONCE, here at stream() call time (so user-opened
+        # cassette/track/OTel scopes propagate in), then drive the scoped generator inside it.
+        ctx = copy_context()
         if isinstance(agent, (list, tuple)):
-            return stream_agents_sync(
+            gen = stream_agents_sync(
                 list(agent), input, session=session, audit=audit, max_turns=max_turns
             )
-        return stream_agent_sync(agent, input, session=session, audit=audit, max_turns=max_turns)
+        else:
+            gen = stream_agent_sync(agent, input, session=session, audit=audit, max_turns=max_turns)
+        return _drive_sync(ctx, gen)
 
     def astream(
         self,
@@ -1266,11 +1370,17 @@ class _Run:
     ) -> Any:
         """Async counterpart of :meth:`stream` (``async for`` over the events); a list streams a
         multi-agent handoff run."""
+        # GLR-9: relay the scoped async generator through a producer Task + queue, so its run scopes
+        # stay confined to the task and never leak into the consumer between deltas.
         if isinstance(agent, (list, tuple)):
-            return stream_agents_async(
+            agen = stream_agents_async(
                 list(agent), input, session=session, audit=audit, max_turns=max_turns
             )
-        return stream_agent_async(agent, input, session=session, audit=audit, max_turns=max_turns)
+        else:
+            agen = stream_agent_async(
+                agent, input, session=session, audit=audit, max_turns=max_turns
+            )
+        return _drive_async(agen)
 
 
 run = _Run()
