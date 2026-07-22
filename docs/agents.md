@@ -257,21 +257,30 @@ const result = await run(agent, 'Weather in Paris?');
 ### Streaming
 
 `run.stream` (sync) / `run.astream` (async) yield events as the run progresses. The events are the
-**`StreamEvent` union** — `TextDelta` (a text chunk), `ToolCallEvent` (a tool is about to run),
-`ToolResultEvent` (a tool returned its result), and the terminal `RunComplete` (which carries the
-same `Result` a blocking `run()` returns). Token-by-token reassembly is native for the OpenAI family
-+ Ollama (tool-call deltas included); other providers fall back to a whole-response delta.
+**`StreamEvent` union** — `TextDelta` (a chunk of the visible answer), `ThinkingDelta` (a chunk of
+streamed **reasoning/thinking**, kept separate from the answer), `ToolCallEvent` (a tool is about to
+run), `ToolResultEvent` (a tool returned its result), and the terminal `RunComplete` (which carries
+the same `Result` a blocking `run()` returns). Token-by-token reassembly is native for the OpenAI
+family + Ollama (tool-call deltas included); other providers fall back to a whole-response delta.
 Multi-agent handoff runs stream too ([Multi-agent](multi-agent.md)).
+
+`ThinkingDelta` (SDK 1.13 / 0.18) is emitted **only** for providers that stream reasoning as it is
+produced — Ollama `think` models and OpenAI-compatible endpoints that stream `reasoning_content`. It
+is additive: a provider that doesn't stream thinking simply yields none, and a consumer that doesn't
+match on it is unaffected. Keeping it separate from `TextDelta` lets a UI render or hide reasoning
+independently of the answer.
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
 
 ```python
-from cendor.sdk import Agent, run, TextDelta, ToolCallEvent, ToolResultEvent, RunComplete
+from cendor.sdk import Agent, run, TextDelta, ThinkingDelta, ToolCallEvent, ToolResultEvent, RunComplete
 
 agent = Agent(name="a", model="gpt-4o", instructions="Be brief.")
 for event in run.stream(agent, "Tell me a joke"):
-    if isinstance(event, TextDelta):
+    if isinstance(event, ThinkingDelta):
+        print(event.text, end="", flush=True)   # reasoning — render or hide separately
+    elif isinstance(event, TextDelta):
         print(event.text, end="", flush=True)
     elif isinstance(event, ToolCallEvent):
         print(f"\n[calling {event.name}({event.arguments})]")
@@ -284,16 +293,38 @@ for event in run.stream(agent, "Tell me a joke"):
 <!-- tab: TypeScript -->
 
 ```ts
-import { Agent, run, TextDelta, ToolCallEvent, ToolResultEvent, RunComplete } from '@cendor/sdk';
+import { Agent, run, TextDelta, ThinkingDelta, ToolCallEvent, ToolResultEvent, RunComplete } from '@cendor/sdk';
 
 const agent = new Agent({ name: 'a', model: 'gpt-4o', instructions: 'Be brief.' });
 for await (const event of run.stream(agent, 'Tell me a joke')) {
-  if (event instanceof TextDelta) process.stdout.write(event.text);
+  if (event instanceof ThinkingDelta) process.stderr.write(event.text); // reasoning, shown separately
+  else if (event instanceof TextDelta) process.stdout.write(event.text);
   else if (event instanceof ToolCallEvent) console.log(`\n[calling ${event.name}]`);
   else if (event instanceof ToolResultEvent) console.log(`\n[${event.name} → ${event.result}]`);
   else if (event instanceof RunComplete) console.log('\ncost:', event.result.cost?.toString());
 }
 ```
+
+<!-- /tabs -->
+
+Reasoning text also lands on your telemetry as thinking content only when
+[content capture](observability.md) is opted in (off by default), parsed out of the raw response —
+the same parts `ThinkingDelta` surfaces live.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+**Stream scopes don't leak into your consumer.** Events are yielded from a generator, but the run's
+ambient scopes — `trace()`, `budget()`, `track()` — are captured **when the stream is created**, not
+re-read each time you advance the iterator (SDK 1.13). So code you run *between* deltas (a `print`, a
+DB write, even another model call of your own) does **not** accidentally inherit the run's budget or
+attribution tags.
+
+<!-- tab: TypeScript -->
+
+> **Not an issue in TypeScript.** The TS runner produces stream events through an internal queue, so
+> your `for await` body never executes inside the run's scope in the first place — the
+> capture-at-creation guarantee holds structurally.
 
 <!-- /tabs -->
 
@@ -371,7 +402,8 @@ A few names that round out the surface:
 |---|---|
 | `Run` | an alias of `Result` (`Run is Result` / `Run === Result`) — same class, either name |
 | `Agent(extra=…)` / `extra` | raw provider request-kwargs merged into every call (`tool_choice`, `reasoning_effort`, `top_p`, `seed`, …) — [Providers → `Agent.extra`](providers.md#provider-params--reasoning--agentextra) |
-| `StreamEvent` | the streaming union: `TextDelta` \| `ToolCallEvent` \| `ToolResultEvent` \| `RunComplete` |
+| `StreamEvent` | the streaming union: `TextDelta` \| `ThinkingDelta` \| `ToolCallEvent` \| `ToolResultEvent` \| `RunComplete` |
+| `ThinkingDelta` | a streamed **reasoning/thinking** chunk (`.text`), separate from `TextDelta` — emitted only by providers that stream reasoning (Ollama `think`, OpenAI-compatible `reasoning_content`) |
 | `ParsedResponse` / `ToolInvocation` | the provider-parse shapes — [Providers → provider-author reference](providers.md#provider-author-reference) |
 
 ### TypeScript-only / low-level exports
@@ -399,6 +431,10 @@ Python's equivalents differ — e.g. Python has no in-memory session *store*, ju
   that never answers finishes `incomplete`, it doesn't error.
 - **Token-level streaming is OpenAI-family + Ollama.** Other providers stream one whole-response
   delta — same events, coarser granularity.
+- **`ThinkingDelta` needs a provider that streams reasoning** (Ollama `think` models,
+  OpenAI-compatible `reasoning_content`); others yield none. And a text-estimated streamed usage count
+  can't see thinking tokens — they aren't in the streamed text — so it undercounts reasoning spend
+  (flagged `usage_estimated`; see [Observability](/docs/observability)).
 - **Provider inference is by model-id prefix.** Hub ids and deployment names (Hugging Face,
   Azure) always need an explicit `provider=` — see [Providers](providers.md).
 - **Structured output is provider-mediated.** Where a provider has no native JSON-schema mode,
