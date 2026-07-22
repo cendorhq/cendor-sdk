@@ -19,7 +19,7 @@ PYPI: dict[str, str] = {
     "cendor-contextkit": "1.0.3",
     "cendor-squeeze": "1.1.0",
     "cendor-cassette": "1.1.0",
-    "cendor-acttrace": "1.10.0",
+    "cendor-acttrace": "1.10.1",
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
     "cendor-sdk": "1.13.0",
