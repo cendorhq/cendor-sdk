@@ -13,7 +13,7 @@ from __future__ import annotations
 AS_OF = "2026-07-23"
 
 PYPI: dict[str, str] = {
-    "cendor-core": "1.10.0",
+    "cendor-core": "1.11.0",
     "cendor-tokenguard": "1.5.0",
     "cendor-guardrails": "1.6.0",
     "cendor-contextkit": "1.0.3",
