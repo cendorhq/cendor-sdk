@@ -146,23 +146,72 @@ def _ollama_message(m: dict) -> dict:
     """Map a canonical message onto the Ollama wire shape.
 
     Assistant ``tool_calls`` keep OpenAI's structure except ``function.arguments``, which Ollama
-    wants as a dict (canonical stores it as a JSON string). Every other message passes through.
+    wants as a dict (canonical stores it as a JSON string). S15: a multimodal user turn (content
+    parts with ``image_url`` data URLs) is flattened to Ollama's ``{content, images: [base64…]}``
+    shape (remote http(s) image URLs are unsupported — no fetching — and are dropped). Every other
+    message passes through.
     """
     tcs = m.get("tool_calls")
-    if m.get("role") != "assistant" or not isinstance(tcs, list):
-        return m
-    mapped = dict(m)
-    mapped["tool_calls"] = [
-        {
-            **tc,
-            "function": {
-                "name": (tc.get("function") or {}).get("name", ""),
-                "arguments": _loads_args((tc.get("function") or {}).get("arguments")),
-            },
-        }
-        for tc in tcs
-    ]
-    return mapped
+    if m.get("role") == "assistant" and isinstance(tcs, list):
+        mapped = dict(m)
+        mapped["tool_calls"] = [
+            {
+                **tc,
+                "function": {
+                    "name": (tc.get("function") or {}).get("name", ""),
+                    "arguments": _loads_args((tc.get("function") or {}).get("arguments")),
+                },
+            }
+            for tc in tcs
+        ]
+        return mapped
+    content = m.get("content")
+    if isinstance(content, list):  # multimodal parts -> Ollama content + images[]
+        texts: list[str] = []
+        images: list[str] = []
+        for p in content:
+            text = _part_text(p)
+            if text is not None:
+                texts.append(text)
+                continue
+            url = _image_url(p)
+            if url and url.startswith("data:"):
+                _, data = _parse_data_url(url)
+                if data:
+                    images.append(data)  # Ollama wants raw base64 (no data: prefix)
+        mapped = dict(m)
+        mapped["content"] = "".join(texts)
+        if images:
+            mapped["images"] = images
+        return mapped
+    return m
+
+
+def _bedrock_content(content: Any) -> list[dict]:
+    """Canonical content -> Bedrock Converse content blocks (text + image). S15: data-URL images
+    become ``{"image": {"format", "source": {"bytes": <raw bytes>}}}`` (Converse takes raw bytes,
+    not
+    base64 or a URL); remote http(s) URLs are unsupported — no fetching — and are dropped."""
+    if not isinstance(content, list):
+        return [{"text": _stringify(content)}]
+    import base64
+
+    blocks: list[dict] = []
+    for p in content:
+        text = _part_text(p)
+        if text is not None:
+            blocks.append({"text": text})
+            continue
+        url = _image_url(p)
+        if url and url.startswith("data:"):
+            media_type, data = _parse_data_url(url)
+            fmt = media_type.split("/", 1)[1] if "/" in media_type else "png"
+            try:
+                raw = base64.b64decode(data)
+            except (ValueError, TypeError):
+                continue
+            blocks.append({"image": {"format": fmt, "source": {"bytes": raw}}})
+    return blocks or [{"text": ""}]
 
 
 def _stringify(content: Any) -> str:
@@ -182,6 +231,45 @@ def _openai_supports_temperature(model: str) -> bool:
     return not model.lower().startswith(_NO_TEMPERATURE_PREFIXES)
 
 
+#: Anthropic families with native structured output (``output_config.format`` json_schema). Others
+#: degrade to the JSON-instruction nudge (still emits JSON, just not schema-enforced) — see
+#: docs/providers.md. Conservative allow-list: only families verified to support it.
+_ANTHROPIC_STRUCTURED_OUTPUT = (
+    "fable-5",
+    "mythos-5",
+    "opus-4-8",
+    "sonnet-5",
+    "haiku-4-5",
+    "opus-4-5",
+    "opus-4-1",
+)
+
+
+def _anthropic_supports_structured_output(model: str) -> bool:
+    m = model.lower()
+    return any(tag in m for tag in _ANTHROPIC_STRUCTURED_OUTPUT)
+
+
+def _normalize_json_schema(schema: dict) -> dict:
+    """Best-effort normalization for Anthropic's ``output_config.format`` json_schema: every object
+    node must set ``additionalProperties: false``. Returns a deep copy; leaves other constraints
+    (the SDK's ``messages.parse()`` would strip unsupported ones — we call ``create`` directly, so a
+    schema using unsupported constraints may 400, which the docs note)."""
+    if not isinstance(schema, dict):
+        return schema
+    out: dict[str, Any] = {}
+    for k, v in schema.items():
+        if isinstance(v, dict):
+            out[k] = _normalize_json_schema(v)
+        elif isinstance(v, list):
+            out[k] = [_normalize_json_schema(i) if isinstance(i, dict) else i for i in v]
+        else:
+            out[k] = v
+    if out.get("type") == "object" and "additionalProperties" not in out:
+        out["additionalProperties"] = False
+    return out
+
+
 def _json_instruction(output_schema: dict | None) -> str:
     """A system-prompt nudge to emit JSON — carrying the schema when one is known (more reliable
     than a bare 'respond with JSON', and the only structured-output lever on providers without a
@@ -198,7 +286,9 @@ def _json_instruction(output_schema: dict | None) -> str:
 # The canonical content shape for multimodal input is OpenAI's content-parts list:
 #   [{"type": "text", "text": "..."}, {"type": "image_url", "image_url": {"url": "data:|https"}}]
 # OpenAI/Azure/Foundry-Local/HF pass this through unchanged; the translators below map it onto
-# Anthropic / Gemini blocks. (Bedrock keeps the text; image bytes are out of scope there for now.)
+# Anthropic / Gemini blocks, Bedrock Converse image blocks, and Ollama's images[] (S15). Data-URL
+# images translate everywhere; remote http(s) image URLs are unsupported on Bedrock/Ollama (no
+# fetch).
 
 
 def _part_text(part: Any) -> str | None:
@@ -326,13 +416,17 @@ def _wrap_create_with_hint(create: Callable[..., Any], message: str) -> Callable
     return wrapped
 
 
-def _ensure_async_detectable(client: Any, path: tuple[str, ...]) -> None:
+def _ensure_async_detectable(client: Any, path: tuple[str, ...], via_thread: bool = False) -> None:
     """Make an async ``create`` method visible to ``inspect.iscoroutinefunction``.
 
     The openai/anthropic v2 SDKs expose ``create`` as a *method wrapper* for which
     ``iscoroutinefunction`` returns ``False`` — so ``cendor-core``'s ``instrument`` would treat an
     async client as sync and capture no usage. Wrapping the terminal method in a genuine ``async
     def`` (before instrumenting) restores detection, so usage/cost are captured on async runs too.
+
+    S5: ``via_thread`` (Bedrock) runs the underlying **blocking** call in ``asyncio.to_thread`` so
+    ``run.aio()`` doesn't block the event loop on boto3's synchronous ``converse``. ``contextvars``
+    are copied into the worker thread, so cendor's ambient run scope still attaches to the call.
     """
     if not path:
         return
@@ -350,8 +444,15 @@ def _ensure_async_detectable(client: Any, path: tuple[str, ...]) -> None:
 
     @functools.wraps(orig)
     async def _acreate(*args: Any, **kwargs: Any) -> Any:
-        # Await only a genuine awaitable — a sync-only client (e.g. boto3 Bedrock) wrapped here
-        # must degrade to a blocking-but-correct call, never crash on "can't be used in await".
+        if via_thread:
+            # A sync-only client (boto3 Bedrock): offload the blocking call to a worker thread so
+            # the event loop keeps running. to_thread copies the current contextvars context, so
+            # cendor's ambient scope (budget frames, trace/conversation id) still attaches.
+            import asyncio
+
+            return await asyncio.to_thread(orig, *args, **kwargs)
+        # Await only a genuine awaitable — a sync-looking async client (openai/anthropic method
+        # wrapper) returns a coroutine here; a truly sync method returns its value directly.
         result = orig(*args, **kwargs)
         if inspect.isawaitable(result):
             return await result
@@ -372,6 +473,9 @@ class Provider:
     #: The provider's standard key env var, named in the missing-key hint. ``None`` ⇒ this provider
     #: has no API-key concept (Bedrock/Ollama/Gemini/Foundry Local) and never emits the hint.
     key_env_var: str | None = None
+    #: S5: run the (blocking, sync-only) client's create in ``asyncio.to_thread`` for ``run.aio()``.
+    #: Only Bedrock (boto3) needs this — every other async surface is genuinely async.
+    _async_via_thread: bool = False
 
     # --- client construction --------------------------------------------------------------------
 
@@ -405,7 +509,9 @@ class Provider:
     def adopt(self, client: Any, async_: bool) -> Any:
         """Prepare a client for the loop: ensure async detection, then instrument (idempotent)."""
         if async_:
-            _ensure_async_detectable(client, self._create_path_for(True))
+            _ensure_async_detectable(
+                client, self._create_path_for(True), via_thread=self._async_via_thread
+            )
         return instrument(client)
 
     def client(self, async_: bool = False, config: dict | None = None) -> Any:
@@ -743,14 +849,27 @@ class AnthropicProvider(Provider):
         output_schema: dict | None = None,
     ) -> dict:
         system = instructions
-        if json_mode:
-            system = (system + _json_instruction(output_schema)).strip()
         wire = _canonical_to_anthropic(messages)
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": wire,
             "max_tokens": max_tokens or 1024,  # Anthropic requires max_tokens
         }
+        # S14: native structured output on supported models (output_config.format json_schema) —
+        # stronger than a prompt nudge and schema-enforced. Older models degrade to the instruction
+        # path. Native structured output can't combine with a forced JSON schema *and* tools
+        # cleanly,
+        # so keep the nudge when the model isn't on the native allow-list.
+        if json_mode:
+            if output_schema and _anthropic_supports_structured_output(model):
+                kwargs["output_config"] = {
+                    "format": {
+                        "type": "json_schema",
+                        "schema": _normalize_json_schema(output_schema),
+                    }
+                }
+            else:
+                system = (system + _json_instruction(output_schema)).strip()
         if system:
             kwargs["system"] = system
         formatted = self.format_tools(tools)
@@ -798,6 +917,91 @@ class AnthropicProvider(Provider):
             tool_calls=tool_calls,
             finish_reason=_get(response, "stop_reason"),
             raw=response,
+        )
+
+    # --- streaming (S1/S2) --------------------------------------------------------------------
+    # Anthropic streams typed SSE events. The runner drives incremental deltas via stream_text /
+    # stream_thinking and reassembles the final ParsedResponse via parse_stream. core wraps the
+    # stream and captures usage/cost independently (message_start input + message_delta output).
+    supports_stream = True
+
+    def stream_text(self, chunk: Any) -> str:
+        # Visible text arrives on content_block_delta events carrying a text_delta.
+        if _get(chunk, "type") == "content_block_delta":
+            delta = _get(chunk, "delta")
+            if _get(delta, "type") == "text_delta":
+                return str(_get(delta, "text", "") or "")
+        return ""
+
+    def stream_thinking(self, chunk: Any) -> str:
+        # S2: extended-thinking text arrives on content_block_delta events carrying a
+        # thinking_delta.
+        if _get(chunk, "type") == "content_block_delta":
+            delta = _get(chunk, "delta")
+            if _get(delta, "type") == "thinking_delta":
+                return str(_get(delta, "thinking", "") or "")
+        return ""
+
+    def parse_stream(self, chunks: list) -> ParsedResponse:
+        """Reassemble Anthropic streamed events into a ParsedResponse.
+
+        Events are keyed by content-block ``index``. Text blocks accumulate ``text_delta`` text;
+        ``tool_use`` blocks capture their id+name from ``content_block_start`` (Anthropic sends
+        those
+        whole) and accumulate the input JSON from ``input_json_delta`` fragments. ``thinking``
+        blocks
+        are streamed separately (stream_thinking) and are not part of the returned content. The
+        ``stop_reason`` arrives on the ``message_delta`` event.
+        """
+        content_parts: list[str] = []
+        blocks: dict[int, dict[str, Any]] = {}  # index -> {"kind", "id", "name", "args"}
+        finish: str | None = None
+        for ch in chunks:
+            etype = _get(ch, "type")
+            if etype == "content_block_start":
+                idx = _get(ch, "index", 0) or 0
+                block = _get(ch, "content_block")
+                btype = _get(block, "type")
+                if btype == "tool_use":
+                    blocks[idx] = {
+                        "kind": "tool_use",
+                        "id": _get(block, "id"),
+                        "name": _get(block, "name") or "",
+                        "args": "",
+                    }
+                else:  # text / thinking — nothing to seed
+                    blocks[idx] = {"kind": btype}
+            elif etype == "content_block_delta":
+                idx = _get(ch, "index", 0) or 0
+                delta = _get(ch, "delta")
+                dtype = _get(delta, "type")
+                if dtype == "text_delta":
+                    content_parts.append(str(_get(delta, "text", "") or ""))
+                elif dtype == "input_json_delta":
+                    slot = blocks.setdefault(
+                        idx, {"kind": "tool_use", "id": None, "name": "", "args": ""}
+                    )
+                    slot["args"] += str(_get(delta, "partial_json", "") or "")
+                # thinking_delta is captured incrementally via stream_thinking, not folded into
+                # content
+            elif etype == "message_delta":
+                sr = _get(_get(ch, "delta"), "stop_reason")
+                if sr:
+                    finish = sr
+        tool_calls = [
+            ToolInvocation(
+                id=slot.get("id") or f"call_{uuid.uuid4().hex[:8]}",
+                name=slot.get("name") or "",
+                arguments=_loads_args(slot.get("args")),
+            )
+            for _, slot in sorted(blocks.items())
+            if slot.get("kind") == "tool_use"
+        ]
+        return ParsedResponse(
+            content="".join(content_parts) or None,
+            tool_calls=tool_calls,
+            finish_reason=finish,
+            raw=chunks,
         )
 
 
@@ -945,8 +1149,8 @@ def _canonical_to_bedrock(messages: list[dict]) -> list[dict]:
                     }
                 )
             out.append({"role": "assistant", "content": blocks or [{"text": ""}]})
-        else:  # user / system-as-user fallback (multimodal: text parts kept)
-            out.append({"role": "user", "content": [{"text": _text_of_content(m.get("content"))}]})
+        else:  # user / system-as-user fallback (S15: multimodal text + image blocks)
+            out.append({"role": "user", "content": _bedrock_content(m.get("content"))})
     flush()
     return out
 
@@ -1043,6 +1247,7 @@ class BedrockProvider(Provider):
 
     name = "bedrock"
     _create_path = ("converse",)
+    _async_via_thread = True  # S5: boto3 converse is blocking — offload to a thread for run.aio()
 
     def _raw_client(self, async_: bool, config: dict) -> Any:
         if config.get("api_key"):

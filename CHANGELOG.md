@@ -4,6 +4,20 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] — 2026-07-23
+Provider-capabilities wave on the new `cendor-core` 1.10 / `cendor-tokenguard` 1.5 shelf.
+
+### Added
+- **Anthropic incremental streaming + ThinkingDelta (S1/S2):** `run.stream`/`run.astream` on an Anthropic agent now emit text incrementally (`text_delta` → `TextDelta`), stream extended thinking (`thinking_delta` → `ThinkingDelta`), and reassemble tool calls from `input_json_delta` fragments (keyed by content-block index). Previously Anthropic fell back to one whole-response delta.
+- **Native Anthropic structured output (S14):** `output_type`/`json_mode` on supported Anthropic families now sends `output_config.format` json_schema (normalized to `additionalProperties: false`) — schema-enforced, stronger than a prompt nudge. Older models degrade to the JSON-instruction path; Bedrock keeps the nudge (forced-`toolChoice` remains a documented honest limit).
+- **Ollama + Bedrock images (S15):** a multimodal user turn with data-URL images translates to Ollama's `message.images` (base64) and Bedrock Converse image blocks (raw bytes). Remote http(s) image URLs stay unsupported (no fetching) — documented.
+
+### Changed
+- **Bedrock async no longer blocks the loop (S5):** `run.aio()` offloads boto3's blocking `converse` to a worker thread (`asyncio.to_thread`); contextvars propagate so the run's governance scope still attaches. Requires `cendor-core >= 1.10` / `cendor-tokenguard >= 1.5`.
+
+### Honest limits (tracked for a follow-up, not in this release)
+- Streamed/multi-agent `conversation.id` grouping, guardrails re-ask / stream-window in the TS port, streamed-run checkpoints, Bedrock forced-`toolChoice` structured output, and the finer TS span-attribute set.
+
 ## [1.13.0] — 2026-07-22
 Wire the SDK onto the `cendor-core` ambient seam, harden `live_spans`, isolate streaming contexts, and add streamed thinking deltas.
 

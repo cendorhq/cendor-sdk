@@ -30,9 +30,11 @@ behind the same `Provider` seam — Hugging Face, Ollama, Gemini, and Bedrock dr
 end-to-end token/cost capture in TypeScript today, via `@cendor/core`'s provider detection. See the
 [parity matrix](/docs/languages).
 
-**Async (`run.aio`)** runs natively for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging
-Face. Google Gemini and AWS Bedrock have no native async client in their SDKs, so `run.aio` executes
-them synchronously for now — correct results, but without a concurrency benefit.
+**Async (`run.aio`)** runs natively for OpenAI (Chat + Responses), Anthropic, Ollama, Hugging Face,
+and **Google Gemini** (google-genai's `aio.models.generate_content`). **AWS Bedrock** (boto3) has no
+async client, so since cendor-sdk 1.14 `run.aio` offloads the blocking `converse` call to a worker
+thread (`asyncio.to_thread`) — the event loop keeps running and the run's governance scope still
+attaches (contextvars propagate into the thread).
 
 ## Core concepts
 
@@ -432,14 +434,15 @@ These three are prefix-inferable (`gemini-*` → Google, dotted `provider.model`
 everything else → Ollama when `provider="ollama"`), so a plain model id is usually enough. Auth
 follows the [resolution order above](#api-keys--credentials); the per-provider specifics:
 
-- **Google Gemini** — `GOOGLE_API_KEY` (or `api_key=` / `apiKey`). No native async client, so
-  `run.aio` runs it synchronously (correct results, no concurrency win).
+- **Google Gemini** — `GOOGLE_API_KEY` (or `api_key=` / `apiKey`). `run.aio` uses google-genai's
+  native async surface (`aio.models.generate_content`) — real concurrency.
 - **AWS Bedrock** — **no API key.** Authentication is the standard AWS credential chain
   (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_SESSION_TOKEN`, an `AWS_PROFILE`, or an
   IAM role) plus a region (`AWS_REGION` / `AWS_DEFAULT_REGION`). Bedrock ids are dotted
-  (`anthropic.claude-…`), so keep `provider="bedrock"` explicit. Like Gemini, no native async.
-  Passing `api_key=` raises a clear error (Bedrock has no key); `base_url=` maps to the boto3 /
-  AWS SDK `endpoint_url` / `endpoint` for a gateway.
+  (`anthropic.claude-…`), so keep `provider="bedrock"` explicit. boto3 has no async client, so since
+  cendor-sdk 1.14 `run.aio` offloads the blocking `converse` to a thread (`asyncio.to_thread`) — the
+  loop stays free; the run's governance scope still attaches. Passing `api_key=` raises a clear error
+  (Bedrock has no key); `base_url=` maps to the boto3 / AWS SDK `endpoint_url` / `endpoint`.
 - **Ollama** — local, no key. A remote daemon is reached via `OLLAMA_HOST` (the ollama SDK's own
   env var) or `base_url=` / `baseURL` (mapped to the client's `host`). Passing `api_key=` raises a
   clear error — Ollama is local and needs none.
@@ -480,7 +483,7 @@ ingestion — live in the library docs: [Providers & Integration](/docs/provider
   Hub/deployment names, and guessing wrong would mis-attribute cost.
 - **Deployment-name models start unpriced** — register a rate or budgets can't bind
   ([above](#pricing-unpriced-models)).
-- **Async concurrency isn't uniform.** Gemini and Bedrock have no native async client, so
-  `run.aio` executes them synchronously (correct results, no concurrency win) — as noted above.
+- **Async is now uniform.** Gemini uses its native async surface and Bedrock's blocking `converse`
+  is offloaded to a thread (since 1.14), so `run.aio` no longer blocks the loop for any provider.
   Usage capture itself is complete: all ten paths capture cost and tokens end-to-end in **both**
   languages, via `@cendor/core`'s provider detection ([parity matrix](/docs/languages)).
