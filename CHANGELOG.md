@@ -4,6 +4,18 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] — 2026-07-23
+Phase-S follow-up — the parity items deferred from 1.14 land, both languages, on the same
+`cendor-core` 1.10 / `cendor-tokenguard` 1.5 shelf (no new floor).
+
+### Added
+- **Streamed + team `conversation.id` (S6):** `run.stream`/`run.astream` and `run_agents`/`run_agents_async` now stamp `Result.conversation_id` from a keyed session and enter the conversation scope, so a monitor groups multi-turn streamed and multi-agent runs — previously single-agent-blocking only.
+- **Streamed checkpoints (S13):** `run.stream`/`run.astream` accept `checkpoint=` (a path or `Checkpointer`) — per-turn saves for a single agent, per-turn + per-segment for a team. A finished checkpoint replays a lone terminal `RunComplete` (no model call, no re-yielded deltas); an unfinished resume continues from the saved messages without re-emitting prior deltas.
+- **Bedrock forced-`toolChoice` structured output (S14):** a **tool-less** Bedrock agent with `output_type` now forces a synthetic schema-shaped tool (`toolConfig.toolChoice`), and the provider unwraps its input into the final answer — stronger than the JSON nudge. Gated to tool-less agents (a forced choice can't coexist with real tools on Converse); with tools present it falls back to the nudge (documented).
+
+### Changed
+- **Streamed-run RAG attributed (S11):** the four stream generators now prepare messages **inside** the run scope (collector + `trace` + per-agent budget), so an always-on retriever's embed call is attributed to the run rather than firing before it opened — parity with the blocking `run()` (GLR-4). No API change.
+
 ## [1.14.0] — 2026-07-23
 Provider-capabilities wave on the new `cendor-core` 1.10 / `cendor-tokenguard` 1.5 shelf.
 

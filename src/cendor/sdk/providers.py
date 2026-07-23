@@ -270,6 +270,15 @@ def _normalize_json_schema(schema: dict) -> dict:
     return out
 
 
+#: S14: the reserved name of the synthetic single-tool Bedrock is forced to call so its ``input``
+#: *is* the structured output. Bedrock Converse has no native json-schema mode, so a forced
+#: ``toolChoice`` on a schema-shaped tool is the strongest lever — but it can't coexist with real
+#: tools (model-dependent on Converse; the Gemini precedent), so it is gated to tool-less agents and
+#: falls back to the JSON nudge otherwise. The provider's ``parse`` unwraps this tool's input back
+#: into ``content`` so the loop never tries to *execute* it.
+_STRUCTURED_OUTPUT_TOOL = "cendor_structured_output"
+
+
 def _json_instruction(output_schema: dict | None) -> str:
     """A system-prompt nudge to emit JSON — carrying the schema when one is known (more reliable
     than a bare 'respond with JSON', and the only structured-output lever on providers without a
@@ -1285,13 +1294,30 @@ class BedrockProvider(Provider):
     ) -> dict:
         wire = _canonical_to_bedrock(messages)
         system_text = instructions
-        if json_mode:
+        forced_tool: dict | None = None
+        if json_mode and output_schema and not tools:
+            # S14: no native json-schema mode on Converse — force a synthetic single-tool call whose
+            # ``input`` IS the answer (unwrapped in ``parse``). Gated to tool-less agents: a forced
+            # ``toolChoice`` can't coexist with real tools (model-dependent; documented limit).
+            forced_tool = {
+                "toolSpec": {
+                    "name": _STRUCTURED_OUTPUT_TOOL,
+                    "description": "Return the final answer as JSON matching the schema.",
+                    "inputSchema": {"json": output_schema},
+                }
+            }
+        elif json_mode:
             system_text = (system_text + _json_instruction(output_schema)).strip()
         kwargs: dict[str, Any] = {"modelId": model, "messages": wire}
         if system_text:
             kwargs["system"] = [{"text": system_text}]
         formatted = self.format_tools(tools)
-        if formatted:
+        if forced_tool is not None:
+            kwargs["toolConfig"] = {
+                "tools": [forced_tool],
+                "toolChoice": {"tool": {"name": _STRUCTURED_OUTPUT_TOOL}},
+            }
+        elif formatted:
             kwargs["toolConfig"] = formatted
         inference: dict[str, Any] = {}
         if temperature is not None:
@@ -1311,10 +1337,17 @@ class BedrockProvider(Provider):
                 text_parts.append(str(_get(block, "text")))
             tu = _get(block, "toolUse")
             if tu:
+                name = _get(tu, "name") or ""
+                if name == _STRUCTURED_OUTPUT_TOOL:
+                    # S14: the forced structured-output tool — its input IS the final answer, not a
+                    # tool to run. Serialize it as content so the loop returns it (and _parse_output
+                    # can coerce it to the declared output_type).
+                    text_parts.append(json.dumps(dict(_get(tu, "input") or {})))
+                    continue
                 tool_calls.append(
                     ToolInvocation(
                         id=_get(tu, "toolUseId") or f"call_{uuid.uuid4().hex[:8]}",
-                        name=_get(tu, "name") or "",
+                        name=name,
                         arguments=dict(_get(tu, "input") or {}),
                     )
                 )

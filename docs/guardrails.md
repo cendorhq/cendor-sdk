@@ -400,8 +400,16 @@ agent = Agent(
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** `reask_on_output_trip` is Python-first in `cendor-sdk`; the TS SDK port
-> rides a later `@cendor/sdk` release — see the [parity matrix](/docs/languages).
+```ts
+import { Agent, rules } from '@cendor/sdk';
+
+const agent = new Agent({
+  name: 'writer',
+  model: 'gpt-4o',
+  guardrails: [rules.keywordDeny(['classified'], { stage: 'output', action: 'block' })],
+  reaskOnOutputTrip: 2, // blocked → "revise it" → re-ask, up to twice, then fail-closed
+});
+```
 
 <!-- /tabs -->
 
@@ -430,8 +438,20 @@ for event in run.stream(agent, "…"):
 
 <!-- tab: TypeScript -->
 
-> **Python only (for now).** `stream_check_window` is Python-first in `cendor-sdk`; the TS SDK port
-> rides a later `@cendor/sdk` release — see the [parity matrix](/docs/languages).
+```ts
+import { Agent, run, rules } from '@cendor/sdk';
+
+const agent = new Agent({
+  name: 'writer',
+  model: 'gpt-4o',
+  instructions: 'Write the answer.',
+  guardrails: [rules.keywordDeny(['confidential'], { stage: 'output', action: 'block' })],
+  streamCheckWindow: 200, // re-check buffered output every 200 chars → block fires earlier
+});
+for await (const event of run.stream(agent, '…')) {
+  void event; // a block throws mid-stream once the window catches the term
+}
+```
 
 <!-- /tabs -->
 

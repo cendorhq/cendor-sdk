@@ -752,6 +752,25 @@ class Runner:
 # --------------------------------------------------------------------------- streaming
 
 
+def _stream_resumed_result(agent: Agent, state: dict, session: Session | None) -> Result:
+    """S13: reconstruct a completed :class:`Result` from a finished (``done``) streamed checkpoint.
+
+    Mirrors :meth:`Runner._resumed_result` — no run is minted and no turn is streamed, so the model
+    and tools are not re-invoked and no prior deltas are re-yielded (S13-D). ``steps`` is empty (no
+    bus events on a resume); the stored ``output`` is parsed to the agent's ``output_type``."""
+    output = state.get("output")
+    return Result(
+        output=_parse_output(output, agent.output_type),
+        steps=[],
+        trace_id=state.get("run_id") or "",
+        conversation_id=getattr(session, "id", None) or "",
+        agents=list(state.get("seen") or [agent.name]),
+        messages=list(state.get("messages") or []),
+        incomplete=output is None,
+        guardrail_decisions=[],  # empty on a resume (the loop never ran)
+    )
+
+
 def stream_agent_sync(
     agent: Agent,
     input: Any,
@@ -759,13 +778,26 @@ def stream_agent_sync(
     session: Session | None = None,
     audit: Any = None,
     max_turns: int | None = None,
+    checkpoint: Any = None,
 ) -> Any:
     """Yield streaming events for a single agent run (``TextDelta`` / ``ToolCallEvent`` /
     ``ToolResultEvent`` / terminal ``RunComplete``). Providers that reassemble a stream emit text
     incrementally; the rest fall back to a whole-response delta. Same governance seams as ``run()``.
-    """
-    messages = _prepare_messages(agent, input, session)
-    run_id = uuid.uuid4().hex
+
+    ``checkpoint`` (S13): a path or ``Checkpointer`` persists the conversation after each turn so a
+    crashed stream resumes without re-doing completed work. A finished checkpoint yields a lone
+    terminal ``RunComplete`` (no model call, no re-yielded deltas); an unfinished one resumes from
+    the saved messages (prior deltas are **not** re-emitted — S13-D)."""
+    from .checkpoint import _as_checkpointer
+
+    ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — replay the stored Result, don't re-stream
+            yield RunComplete(_stream_resumed_result(agent, done, session))
+            return
+    resume = ckpt.resumable_messages() if ckpt is not None else None
+    run_id = uuid.uuid4().hex  # fresh id even on resume (single-agent parity with Runner._start)
     provider = agent.provider_impl
     create = provider.create_method(_client_for(agent, async_=False))
     tools = agent.toolset
@@ -773,14 +805,23 @@ def stream_agent_sync(
     turns = max_turns or agent.max_turns
     gl = _gr.effective(agent, None)
     output: Any = None
+    messages: list[dict] = resume if resume is not None else []
 
-    with (
-        _scope(agent),  # attribute spend + enforce agent.max_usd (pre-flight block)
-        _collector(run_id) as events,
-        trace(run_id),
-        _decision(audit, agent, messages, run_id),
-        _gr.collecting() as run_decisions,  # for Result.guardrail_decisions
-    ):
+    def _save(done: bool) -> None:  # S13: per-turn checkpoint at each turn boundary
+        if ckpt is not None:
+            ckpt.save({"run_id": run_id, "messages": messages, "done": done, "output": output})
+
+    # S11: mirror run_agent_sync's ExitStack ordering — prepare INSIDE collector+trace+scope so a
+    # retriever's embed is attributed (collected + trace-stamped + budgeted), _decision after it.
+    with ExitStack() as _stack:
+        _stack.enter_context(_scope(agent))  # attribute spend + enforce agent.max_usd (pre-flight)
+        _stack.enter_context(_conversation_scope(session))  # S6: session key → live_spans (G19)
+        events = _stack.enter_context(_collector(run_id))
+        _stack.enter_context(trace(run_id))
+        if resume is None:  # GLR-4/S11: RAG embed attributed to the run
+            messages.extend(_prepare_messages(agent, input, session))
+        _stack.enter_context(_decision(audit, agent, messages, run_id))
+        run_decisions = _stack.enter_context(_gr.collecting())  # for Result.guardrail_decisions
         _gr.gate_input_sync(gl, agent, messages, run_id)  # pre-spend: block raises, redact rewrites
         for _turn in range(turns):
             wire = _assemble(agent, messages)
@@ -829,19 +870,23 @@ def stream_agent_sync(
                     result = _exec_tool_sync(agent.get_tool, tc, gl, agent, run_id, instruction)
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     yield ToolResultEvent(tc.name, result)
+                _save(False)  # S13: checkpoint after the tool turn
                 continue
             # output stage runs after the deltas already streamed — a block raises here (post-hoc)
             output = _gr.gate_output_sync(gl, agent, parsed.content, run_id)
+            _save(False)  # S13: checkpoint after the answering turn (before the run scope unwinds)
             break
 
     if session is not None:
         session.replace(messages)
+    _save(True)  # S13: final done save
     steps = [_step(agent.name, e) for e in events]
     yield RunComplete(
         Result(
             output=_parse_output(output, agent.output_type),
             steps=steps,
             trace_id=run_id,
+            conversation_id=getattr(session, "id", None) or "",  # S6
             agents=[agent.name],
             messages=messages,
             incomplete=output is None,
@@ -857,9 +902,19 @@ async def stream_agent_async(
     session: Session | None = None,
     audit: Any = None,
     max_turns: int | None = None,
+    checkpoint: Any = None,
 ) -> Any:
-    """Async counterpart of :func:`stream_agent_sync` (``async for`` over the same events)."""
-    messages = _prepare_messages(agent, input, session)
+    """Async counterpart of :func:`stream_agent_sync` (``async for`` over the same events); same
+    ``checkpoint`` (S13) semantics."""
+    from .checkpoint import _as_checkpointer
+
+    ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — replay the stored Result, don't re-stream
+            yield RunComplete(_stream_resumed_result(agent, done, session))
+            return
+    resume = ckpt.resumable_messages() if ckpt is not None else None
     run_id = uuid.uuid4().hex
     provider = agent.provider_impl
     create = provider.create_method(_client_for(agent, async_=True), async_=True)
@@ -868,14 +923,21 @@ async def stream_agent_async(
     turns = max_turns or agent.max_turns
     gl = _gr.effective(agent, None)
     output: Any = None
+    messages: list[dict] = resume if resume is not None else []
 
-    with (
-        _scope(agent),  # attribute spend + enforce agent.max_usd (pre-flight block)
-        _collector(run_id) as events,
-        trace(run_id),
-        _decision(audit, agent, messages, run_id),
-        _gr.collecting() as run_decisions,  # for Result.guardrail_decisions
-    ):
+    def _save(done: bool) -> None:  # S13: per-turn checkpoint at each turn boundary
+        if ckpt is not None:
+            ckpt.save({"run_id": run_id, "messages": messages, "done": done, "output": output})
+
+    with ExitStack() as _stack:
+        _stack.enter_context(_scope(agent))  # attribute spend + enforce agent.max_usd (pre-flight)
+        _stack.enter_context(_conversation_scope(session))  # S6: session key → live_spans (G19)
+        events = _stack.enter_context(_collector(run_id))
+        _stack.enter_context(trace(run_id))
+        if resume is None:  # GLR-4/S11: RAG embed attributed to the run
+            messages.extend(_prepare_messages(agent, input, session))
+        _stack.enter_context(_decision(audit, agent, messages, run_id))
+        run_decisions = _stack.enter_context(_gr.collecting())  # for Result.guardrail_decisions
         await _gr.gate_input_async(gl, agent, messages, run_id)  # pre-spend: block raises / redact
         for _turn in range(turns):
             wire = _assemble(agent, messages)
@@ -927,19 +989,23 @@ async def stream_agent_async(
                     )
                     messages.append(tool_result_message(tc.id, tc.name, result))
                     yield ToolResultEvent(tc.name, result)
+                _save(False)  # S13: checkpoint after the tool turn
                 continue
             # output stage runs after the deltas already streamed — a block raises here (post-hoc)
             output = await _gr.gate_output_async(gl, agent, parsed.content, run_id)
+            _save(False)  # S13: checkpoint after the answering turn (before the scope unwinds)
             break
 
     if session is not None:
         session.replace(messages)
+    _save(True)  # S13: final done save
     steps = [_step(agent.name, e) for e in events]
     yield RunComplete(
         Result(
             output=_parse_output(output, agent.output_type),
             steps=steps,
             trace_id=run_id,
+            conversation_id=getattr(session, "id", None) or "",  # S6
             agents=[agent.name],
             messages=messages,
             incomplete=output is None,
@@ -955,99 +1021,150 @@ def stream_agents_sync(
     session: Session | None = None,
     audit: Any = None,
     max_turns: int | None = None,
+    checkpoint: Any = None,
 ) -> Any:
     """Stream a **multi-agent** (handoff) run as events; one terminal ``RunComplete`` carries the
     aggregate ``Result``. Mirrors :func:`run_agents`' segment loop, streaming each active agent's
-    turns and switching when it calls a ``transfer_to_<peer>`` tool."""
+    turns and switching when it calls a ``transfer_to_<peer>`` tool.
+
+    ``checkpoint`` (S13): per-turn **and** per-segment saves persist ``{active, seen, seg}`` so a
+    crashed team stream resumes at the segment/turn it left off (prior deltas are not re-emitted —
+    S13-D); a finished checkpoint yields a lone terminal ``RunComplete``."""
+    from .checkpoint import _as_checkpointer
     from .orchestration import _effective
 
     registry = {a.name: a for a in agents}
-    parent = uuid.uuid4().hex
-    messages = _prepare_messages(agents[0], input, session)
-    active = agents[0]
-    seen: list[str] = []
+    ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — replay the stored Result, don't re-stream
+            final = registry.get(done.get("active") or "", agents[0])
+            yield RunComplete(_stream_resumed_result(final, done, session))
+            return
+    state = ckpt.load() if ckpt is not None else None
+    if state is not None and not state.get("done"):  # S13: resume an unfinished team stream
+        parent = state.get("run_id") or uuid.uuid4().hex
+        messages: list[dict] = list(state.get("messages") or [])
+        active = registry.get(state.get("active") or "", agents[0])
+        seen: list[str] = list(state.get("seen") or [])
+        start_seg = int(state.get("seg", 0))
+        prepared = True  # a resumed conversation already carries its prepared messages
+    else:
+        parent = uuid.uuid4().hex
+        messages = []
+        active = agents[0]
+        seen = []
+        start_seg = 0
+        prepared = False
     steps: list = []
     output: Any = None
     run_decisions: list = []  # accumulated across segments for Result.guardrail_decisions
-    for seg in range(2 * len(registry) + 2):
-        if active.name not in seen:
-            seen.append(active.name)
-        child = f"{parent}:{active.name}#{seg}"
-        tools, tool_map, transfer_map = _effective(active, registry)
-        provider = active.provider_impl
-        create = provider.create_method(_client_for(active, async_=False))
-        json_mode = active.output_type is not None
-        turns = max_turns or active.max_turns
-        gl = _gr.effective(active, None)
-        switched: str | None = None
-        with (
-            _scope(active),
-            _collector(child, agent_name=active.name) as events,
-            trace(child),
-            _decision(audit, active, messages, child),
-            _gr.collecting() as seg_decisions,  # per-segment; accumulated below
-        ):
-            _gr.gate_input_sync(gl, active, messages, child)  # pre-spend per segment
-            for _turn in range(turns):
-                wire = _assemble(active, messages)
-                kwargs = provider.build_kwargs(
-                    active.model,
-                    wire,
-                    tools,
-                    active.instructions,
-                    json_mode=json_mode,
-                    temperature=active.temperature,
-                    max_tokens=active.max_tokens,
-                    output_schema=_schema_from_output_type(active.output_type),
-                )
-                if active.extra:
-                    kwargs.update(active.extra)
-                if active.cache:
-                    kwargs = provider.apply_cache(kwargs)
-                if provider.supports_stream:
-                    chunks: list = []
-                    for chunk in create(**{**kwargs, "stream": True}):
-                        chunks.append(chunk)
-                        thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
-                        if thinking:
-                            yield ThinkingDelta(thinking)
-                        delta = provider.stream_text(chunk)
-                        if delta:
-                            yield TextDelta(delta)
-                    parsed = provider.parse_stream(chunks)
-                else:
-                    parsed = provider.parse(create(**kwargs))
-                    if parsed.content:
-                        yield TextDelta(parsed.content)
-                messages.append(assistant_message(parsed.content, parsed.tool_calls))
-                if parsed.tool_calls:
-                    instruction = _gr.originating_instruction(messages)
-                    for tc in parsed.tool_calls:
-                        yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                        result = _exec_tool_sync(tool_map.get, tc, gl, active, child, instruction)
-                        messages.append(tool_result_message(tc.id, tc.name, result))
-                        yield ToolResultEvent(tc.name, result)
-                        if tc.name in transfer_map:
-                            switched = transfer_map[tc.name]
-                    if switched:
-                        break
-                    continue
-                output = _gr.gate_output_sync(gl, active, parsed.content, child)
-                break
-        steps.extend(_step(active.name, e) for e in events)
-        run_decisions.extend(seg_decisions)
-        if switched and switched in registry:
-            active = registry[switched]
-            continue
-        break
+    max_segments = 2 * len(registry) + 2
+    seg = start_seg
+
+    def _save(done: bool, seg_no: int, active_name: str) -> None:  # S13
+        if ckpt is not None:
+            ckpt.save(
+                {
+                    "run_id": parent,
+                    "messages": messages,
+                    "active": active_name,
+                    "seen": seen,
+                    "seg": seg_no,
+                    "done": done,
+                    "output": output,
+                }
+            )
+
+    with _conversation_scope(session):  # S6: session key → live_spans (G19), whole team run
+        for seg in range(start_seg, max_segments):
+            if active.name not in seen:
+                seen.append(active.name)
+            child = f"{parent}:{active.name}#{seg}"
+            tools, tool_map, transfer_map = _effective(active, registry)
+            provider = active.provider_impl
+            create = provider.create_method(_client_for(active, async_=False))
+            json_mode = active.output_type is not None
+            turns = max_turns or active.max_turns
+            gl = _gr.effective(active, None)
+            switched: str | None = None
+            with ExitStack() as _stack:
+                _stack.enter_context(_scope(active))
+                events = _stack.enter_context(_collector(child, agent_name=active.name))
+                _stack.enter_context(trace(child))
+                if not prepared:  # GLR-4/S11: prepare inside the first segment's scope
+                    messages.extend(_prepare_messages(agents[0], input, session))
+                    prepared = True
+                _stack.enter_context(_decision(audit, active, messages, child))
+                seg_decisions = _stack.enter_context(_gr.collecting())  # accumulated below
+                _gr.gate_input_sync(gl, active, messages, child)  # pre-spend per segment
+                for _turn in range(turns):
+                    wire = _assemble(active, messages)
+                    kwargs = provider.build_kwargs(
+                        active.model,
+                        wire,
+                        tools,
+                        active.instructions,
+                        json_mode=json_mode,
+                        temperature=active.temperature,
+                        max_tokens=active.max_tokens,
+                        output_schema=_schema_from_output_type(active.output_type),
+                    )
+                    if active.extra:
+                        kwargs.update(active.extra)
+                    if active.cache:
+                        kwargs = provider.apply_cache(kwargs)
+                    if provider.supports_stream:
+                        chunks: list = []
+                        for chunk in create(**{**kwargs, "stream": True}):
+                            chunks.append(chunk)
+                            thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning
+                            if thinking:
+                                yield ThinkingDelta(thinking)
+                            delta = provider.stream_text(chunk)
+                            if delta:
+                                yield TextDelta(delta)
+                        parsed = provider.parse_stream(chunks)
+                    else:
+                        parsed = provider.parse(create(**kwargs))
+                        if parsed.content:
+                            yield TextDelta(parsed.content)
+                    messages.append(assistant_message(parsed.content, parsed.tool_calls))
+                    if parsed.tool_calls:
+                        instruction = _gr.originating_instruction(messages)
+                        for tc in parsed.tool_calls:
+                            yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                            result = _exec_tool_sync(
+                                tool_map.get, tc, gl, active, child, instruction
+                            )
+                            messages.append(tool_result_message(tc.id, tc.name, result))
+                            yield ToolResultEvent(tc.name, result)
+                            if tc.name in transfer_map:
+                                switched = transfer_map[tc.name]
+                        _save(False, seg, active.name)  # S13: checkpoint after the tool turn
+                        if switched:
+                            break
+                        continue
+                    output = _gr.gate_output_sync(gl, active, parsed.content, child)
+                    _save(False, seg, active.name)  # S13: checkpoint after the answering turn
+                    break
+            steps.extend(_step(active.name, e) for e in events)
+            run_decisions.extend(seg_decisions)
+            if switched and switched in registry:
+                active = registry[switched]
+                _save(False, seg + 1, active.name)  # S13: checkpoint the handoff
+                continue
+            break
 
     if session is not None:
         session.replace(messages)
+    _save(True, seg, active.name)  # S13: final done save
     yield RunComplete(
         Result(
             output=_parse_output(output, active.output_type),
             steps=steps,
             trace_id=parent,
+            conversation_id=getattr(session, "id", None) or "",  # S6
             agents=seen,
             messages=messages,
             incomplete=output is None,
@@ -1063,100 +1180,146 @@ async def stream_agents_async(
     session: Session | None = None,
     audit: Any = None,
     max_turns: int | None = None,
+    checkpoint: Any = None,
 ) -> Any:
-    """Async counterpart of :func:`stream_agents_sync` (``async for`` over the events)."""
+    """Async counterpart of :func:`stream_agents_sync` (``async for`` over the events); same
+    per-segment ``checkpoint`` (S13) semantics."""
+    from .checkpoint import _as_checkpointer
     from .orchestration import _effective
 
     registry = {a.name: a for a in agents}
-    parent = uuid.uuid4().hex
-    messages = _prepare_messages(agents[0], input, session)
-    active = agents[0]
-    seen: list[str] = []
+    ckpt = _as_checkpointer(checkpoint)
+    if ckpt is not None:
+        done = ckpt.finished()
+        if done is not None:  # already finished — replay the stored Result, don't re-stream
+            final = registry.get(done.get("active") or "", agents[0])
+            yield RunComplete(_stream_resumed_result(final, done, session))
+            return
+    state = ckpt.load() if ckpt is not None else None
+    if state is not None and not state.get("done"):  # S13: resume an unfinished team stream
+        parent = state.get("run_id") or uuid.uuid4().hex
+        messages: list[dict] = list(state.get("messages") or [])
+        active = registry.get(state.get("active") or "", agents[0])
+        seen: list[str] = list(state.get("seen") or [])
+        start_seg = int(state.get("seg", 0))
+        prepared = True
+    else:
+        parent = uuid.uuid4().hex
+        messages = []
+        active = agents[0]
+        seen = []
+        start_seg = 0
+        prepared = False
     steps: list = []
     output: Any = None
     run_decisions: list = []  # accumulated across segments for Result.guardrail_decisions
-    for seg in range(2 * len(registry) + 2):
-        if active.name not in seen:
-            seen.append(active.name)
-        child = f"{parent}:{active.name}#{seg}"
-        tools, tool_map, transfer_map = _effective(active, registry)
-        provider = active.provider_impl
-        create = provider.create_method(_client_for(active, async_=True), async_=True)
-        json_mode = active.output_type is not None
-        turns = max_turns or active.max_turns
-        gl = _gr.effective(active, None)
-        switched: str | None = None
-        with (
-            _scope(active),
-            _collector(child, agent_name=active.name) as events,
-            trace(child),
-            _decision(audit, active, messages, child),
-            _gr.collecting() as seg_decisions,  # per-segment; accumulated below
-        ):
-            await _gr.gate_input_async(gl, active, messages, child)  # pre-spend per segment
-            for _turn in range(turns):
-                wire = _assemble(active, messages)
-                kwargs = provider.build_kwargs(
-                    active.model,
-                    wire,
-                    tools,
-                    active.instructions,
-                    json_mode=json_mode,
-                    temperature=active.temperature,
-                    max_tokens=active.max_tokens,
-                    output_schema=_schema_from_output_type(active.output_type),
-                )
-                if active.extra:
-                    kwargs.update(active.extra)
-                if active.cache:
-                    kwargs = provider.apply_cache(kwargs)
-                if provider.supports_stream:
-                    chunks = []
-                    stream = await create(**{**kwargs, "stream": True})
-                    async for chunk in stream:
-                        chunks.append(chunk)
-                        thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning, if streamed
-                        if thinking:
-                            yield ThinkingDelta(thinking)
-                        delta = provider.stream_text(chunk)
-                        if delta:
-                            yield TextDelta(delta)
-                    parsed = provider.parse_stream(chunks)
-                else:
-                    parsed = provider.parse(await create(**kwargs))
-                    if parsed.content:
-                        yield TextDelta(parsed.content)
-                messages.append(assistant_message(parsed.content, parsed.tool_calls))
-                if parsed.tool_calls:
-                    instruction = _gr.originating_instruction(messages)
-                    for tc in parsed.tool_calls:
-                        yield ToolCallEvent(tc.name, tc.arguments, tc.id)
-                        result = await _exec_tool_async(
-                            tool_map.get, tc, gl, active, child, instruction
-                        )
-                        messages.append(tool_result_message(tc.id, tc.name, result))
-                        yield ToolResultEvent(tc.name, result)
-                        if tc.name in transfer_map:
-                            switched = transfer_map[tc.name]
-                    if switched:
-                        break
-                    continue
-                output = await _gr.gate_output_async(gl, active, parsed.content, child)
-                break
-        steps.extend(_step(active.name, e) for e in events)
-        run_decisions.extend(seg_decisions)
-        if switched and switched in registry:
-            active = registry[switched]
-            continue
-        break
+    max_segments = 2 * len(registry) + 2
+    seg = start_seg
+
+    def _save(done: bool, seg_no: int, active_name: str) -> None:  # S13
+        if ckpt is not None:
+            ckpt.save(
+                {
+                    "run_id": parent,
+                    "messages": messages,
+                    "active": active_name,
+                    "seen": seen,
+                    "seg": seg_no,
+                    "done": done,
+                    "output": output,
+                }
+            )
+
+    with _conversation_scope(session):  # S6: session key → live_spans (G19), whole team run
+        for seg in range(start_seg, max_segments):
+            if active.name not in seen:
+                seen.append(active.name)
+            child = f"{parent}:{active.name}#{seg}"
+            tools, tool_map, transfer_map = _effective(active, registry)
+            provider = active.provider_impl
+            create = provider.create_method(_client_for(active, async_=True), async_=True)
+            json_mode = active.output_type is not None
+            turns = max_turns or active.max_turns
+            gl = _gr.effective(active, None)
+            switched: str | None = None
+            with ExitStack() as _stack:
+                _stack.enter_context(_scope(active))
+                events = _stack.enter_context(_collector(child, agent_name=active.name))
+                _stack.enter_context(trace(child))
+                if not prepared:  # GLR-4/S11: prepare inside the first segment's scope
+                    messages.extend(_prepare_messages(agents[0], input, session))
+                    prepared = True
+                _stack.enter_context(_decision(audit, active, messages, child))
+                seg_decisions = _stack.enter_context(_gr.collecting())  # accumulated below
+                await _gr.gate_input_async(gl, active, messages, child)  # pre-spend per segment
+                for _turn in range(turns):
+                    wire = _assemble(active, messages)
+                    kwargs = provider.build_kwargs(
+                        active.model,
+                        wire,
+                        tools,
+                        active.instructions,
+                        json_mode=json_mode,
+                        temperature=active.temperature,
+                        max_tokens=active.max_tokens,
+                        output_schema=_schema_from_output_type(active.output_type),
+                    )
+                    if active.extra:
+                        kwargs.update(active.extra)
+                    if active.cache:
+                        kwargs = provider.apply_cache(kwargs)
+                    if provider.supports_stream:
+                        chunks = []
+                        stream = await create(**{**kwargs, "stream": True})
+                        async for chunk in stream:
+                            chunks.append(chunk)
+                            thinking = provider.stream_thinking(chunk)  # GLR-12: reasoning
+                            if thinking:
+                                yield ThinkingDelta(thinking)
+                            delta = provider.stream_text(chunk)
+                            if delta:
+                                yield TextDelta(delta)
+                        parsed = provider.parse_stream(chunks)
+                    else:
+                        parsed = provider.parse(await create(**kwargs))
+                        if parsed.content:
+                            yield TextDelta(parsed.content)
+                    messages.append(assistant_message(parsed.content, parsed.tool_calls))
+                    if parsed.tool_calls:
+                        instruction = _gr.originating_instruction(messages)
+                        for tc in parsed.tool_calls:
+                            yield ToolCallEvent(tc.name, tc.arguments, tc.id)
+                            result = await _exec_tool_async(
+                                tool_map.get, tc, gl, active, child, instruction
+                            )
+                            messages.append(tool_result_message(tc.id, tc.name, result))
+                            yield ToolResultEvent(tc.name, result)
+                            if tc.name in transfer_map:
+                                switched = transfer_map[tc.name]
+                        _save(False, seg, active.name)  # S13: checkpoint after the tool turn
+                        if switched:
+                            break
+                        continue
+                    output = await _gr.gate_output_async(gl, active, parsed.content, child)
+                    _save(False, seg, active.name)  # S13: checkpoint after the answering turn
+                    break
+            steps.extend(_step(active.name, e) for e in events)
+            run_decisions.extend(seg_decisions)
+            if switched and switched in registry:
+                active = registry[switched]
+                _save(False, seg + 1, active.name)  # S13: checkpoint the handoff
+                continue
+            break
 
     if session is not None:
         session.replace(messages)
+    _save(True, seg, active.name)  # S13: final done save
     yield RunComplete(
         Result(
             output=_parse_output(output, active.output_type),
             steps=steps,
             trace_id=parent,
+            conversation_id=getattr(session, "id", None) or "",  # S6
             agents=seen,
             messages=messages,
             incomplete=output is None,
@@ -1344,19 +1507,36 @@ class _Run:
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
+        checkpoint: Any = None,
     ) -> Any:
         """Stream a run as events (sync generator). Terminal event is ``RunComplete`` carrying the
         ``Result``. A single agent streams its turns; a list streams a multi-agent handoff run,
-        switching active agents on a ``transfer_to_<peer>`` call — one terminal ``RunComplete``."""
+        switching active agents on a ``transfer_to_<peer>`` call — one terminal ``RunComplete``.
+
+        ``checkpoint`` (S13, a path or ``Checkpointer``) persists the conversation as the stream
+        progresses so a crashed stream resumes without re-doing completed work (prior deltas are not
+        re-emitted); a finished checkpoint yields a lone terminal ``RunComplete``."""
         # GLR-9: copy the caller's context ONCE, here at stream() call time (so user-opened
         # cassette/track/OTel scopes propagate in), then drive the scoped generator inside it.
         ctx = copy_context()
         if isinstance(agent, (list, tuple)):
             gen = stream_agents_sync(
-                list(agent), input, session=session, audit=audit, max_turns=max_turns
+                list(agent),
+                input,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                checkpoint=checkpoint,
             )
         else:
-            gen = stream_agent_sync(agent, input, session=session, audit=audit, max_turns=max_turns)
+            gen = stream_agent_sync(
+                agent,
+                input,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                checkpoint=checkpoint,
+            )
         return _drive_sync(ctx, gen)
 
     def astream(
@@ -1367,9 +1547,10 @@ class _Run:
         session: Session | None = None,
         audit: Any = None,
         max_turns: int | None = None,
+        checkpoint: Any = None,
     ) -> Any:
         """Async counterpart of :meth:`stream` (``async for`` over the events); a list streams a
-        multi-agent handoff run."""
+        multi-agent handoff run. Same ``checkpoint`` (S13) semantics."""
         # GLR-9: relay the scoped async generator through a producer Task + queue, so its run scopes
         # stay confined to the task and never leak into the consumer between deltas.
         if isinstance(agent, (list, tuple)):

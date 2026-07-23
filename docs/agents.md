@@ -219,9 +219,12 @@ Each `Step` wraps the actual `LLMCall`/`ToolCall` from the bus (`.call`), with `
 
 `output_type` accepts a dataclass or Pydantic model (Python), a zod schema (TypeScript), or a
 raw JSON-schema object in either language. The schema is sent via each provider's native
-structured-output feature — OpenAI `json_schema`, Ollama `format`, Gemini `response_schema`;
-Anthropic/Bedrock embed it in the JSON instruction — which is far more reliable than a bare
-"respond with JSON". The final message is parsed into the requested type:
+structured-output feature — OpenAI `json_schema`, Ollama `format`, Gemini `response_schema`,
+Anthropic `output_config.format` (supported models); **Bedrock** forces a synthetic-tool
+`toolChoice` shaped by the schema when the agent has **no tools** (a forced choice can't coexist
+with real tools on Converse), and otherwise (older Anthropic models, Bedrock with tools) embeds it
+in the JSON instruction — far more reliable than a bare "respond with JSON". The final message is
+parsed into the requested type:
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -438,4 +441,5 @@ Python's equivalents differ — e.g. Python has no in-memory session *store*, ju
 - **Provider inference is by model-id prefix.** Hub ids and deployment names (Hugging Face,
   Azure) always need an explicit `provider=` — see [Providers](providers.md).
 - **Structured output is provider-mediated.** Where a provider has no native JSON-schema mode,
-  the schema rides the instruction — reliable in practice, but not a grammar-level guarantee.
+  the schema rides the instruction (or, for a **tool-less** Bedrock agent, a forced-`toolChoice`
+  synthetic tool) — reliable in practice, but not a grammar-level guarantee.

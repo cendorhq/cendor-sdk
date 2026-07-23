@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import _guardrails as _gr
-from ._governance import _scope
+from ._governance import _conversation_scope, _scope
 from .agent import Agent
 from .result import Result
 from .runner import _parse_output, _prepare_messages, run_agent_async, run_agent_sync
@@ -90,7 +90,7 @@ def _user_message(value: Any) -> dict:
 # --------------------------------------------------------------------------- handoff / supervisor
 
 
-def _finished_result(state: dict, agents: list[Agent]) -> Result:
+def _finished_result(state: dict, agents: list[Agent], session: Any = None) -> Result:
     """Reconstruct the completed ``Result`` from a finished (``done``) checkpoint.
 
     Resuming an already-finished run must not re-enter the loop or mint a run — no model or tool
@@ -104,6 +104,7 @@ def _finished_result(state: dict, agents: list[Agent]) -> Result:
         output=_parse_output(output, active.output_type),
         steps=[],
         trace_id=state.get("run_id") or "",
+        conversation_id=getattr(session, "id", None) or "",  # S6
         agents=list(state.get("seen") or [a.name for a in agents]),
         messages=list(state.get("messages") or []),
         incomplete=output is None,
@@ -150,7 +151,7 @@ def run_agents(
     if ckpt is not None:
         done = ckpt.finished()
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
-            return _finished_result(done, agents)
+            return _finished_result(done, agents, session)
     registry = {a.name: a for a in agents}
     parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
@@ -178,7 +179,8 @@ def run_agents(
         child = f"{parent}:{active.name}#{seg}"
         tools, tool_map, transfer_map = _effective(active, registry)
         on_turn = (lambda _m, _s=seg, _a=active.name: _save(False, _s, _a)) if ckpt else None
-        with _scope(active):
+        # S6: propagate the session key to live_spans (G19) for the whole team run, per segment.
+        with _conversation_scope(session), _scope(active):
             output, seg_steps, switched = run_agent_sync(
                 active,
                 messages,
@@ -206,6 +208,7 @@ def run_agents(
         output=_parse_output(output, active.output_type),
         steps=steps,
         trace_id=parent,
+        conversation_id=getattr(session, "id", None) or "",  # S6
         agents=seen,
         messages=messages,
         incomplete=output is None,
@@ -231,7 +234,7 @@ async def run_agents_async(
     if ckpt is not None:
         done = ckpt.finished()
         if done is not None:  # already finished — return the stored Result, don't re-run the loop
-            return _finished_result(done, agents)
+            return _finished_result(done, agents, session)
     registry = {a.name: a for a in agents}
     parent, messages, active, seen, start_seg = _resume_state(ckpt, agents, input, session)
     steps: list = []
@@ -259,7 +262,8 @@ async def run_agents_async(
         child = f"{parent}:{active.name}#{seg}"
         tools, tool_map, transfer_map = _effective(active, registry)
         on_turn = (lambda _m, _s=seg, _a=active.name: _save(False, _s, _a)) if ckpt else None
-        with _scope(active):
+        # S6: propagate the session key to live_spans (G19) for the whole team run, per segment.
+        with _conversation_scope(session), _scope(active):
             output, seg_steps, switched = await run_agent_async(
                 active,
                 messages,
@@ -287,6 +291,7 @@ async def run_agents_async(
         output=_parse_output(output, active.output_type),
         steps=steps,
         trace_id=parent,
+        conversation_id=getattr(session, "id", None) or "",  # S6
         agents=seen,
         messages=messages,
         incomplete=output is None,
