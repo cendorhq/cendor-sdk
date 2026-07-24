@@ -234,6 +234,9 @@ cost, the tool calls, and the guardrail verdicts, without importing `contextkit`
   instead of compressing — no error, just a coarser result.
 - **Evidence, not compliance.** `acttrace` produces evidence to *support* a compliance case; it
   doesn't make one, and the SDK inherits that limit unchanged.
-- **Parity is documented, not version-coupled.** Where the TypeScript SDK trails Python (e.g.
-  `reask_on_output_trip`, `stream_check_window`), the pages say so and the
-  [parity matrix](/docs/languages) is authoritative.
+- **Parity is documented, not version-coupled.** Genuine differences are library-level, not
+  SDK-level — e.g. PII redaction uses Presidio NER in Python (`[ner]` extra) vs `compromise` in
+  TypeScript (lower recall). Where such a difference exists the pages say so, and the
+  [parity matrix](/docs/languages) is authoritative. (The agent-loop surface itself —
+  `reask_on_output_trip`, `stream_check_window`, streamed checkpoints, `conversation.id`, the six
+  telemetry domains — ships in **both** languages.)
