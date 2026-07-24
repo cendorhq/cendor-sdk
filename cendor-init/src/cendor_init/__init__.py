@@ -18,4 +18,4 @@ try:
 
     __version__ = _metadata.version("cendor-init")
 except Exception:  # running from a checkout without installed dist metadata
-    __version__ = "0.2.0"
+    __version__ = "0.2.2"

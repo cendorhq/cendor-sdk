@@ -1,5 +1,17 @@
 # cendor-init changelog
 
+## Unreleased
+
+- Offline versions snapshot refreshed to the 2026-07-24 shelf (`cendor-sdk` 1.17.0 / `@cendor/sdk`
+  0.21.1; `/releases` remains the source of truth).
+- **Snapshot-bump policy:** the JS `doctor` clean-bill test fixture now derives its `@cendor/core`
+  pin from the bundled versions snapshot rather than hardcoding it, so a snapshot refresh can no
+  longer make the fixture read as "behind" (it broke CI twice); the Python `doctor` test already uses
+  open `>=` ranges, which never trip the behind check. Snapshot refreshes are changelog-noted here.
+- Dev tooling: pinned `ruff==0.15.20` (org-wide pin; matches `cendor-sdk`) and added a CI lint+test
+  job so `cendor-init`'s tests actually run on push (they previously ran nowhere). Bookkeeping only —
+  no behaviour change, no release.
+
 ## 0.2.2 — 2026-07-13
 
 - `init --scaffold` now emits a provider-key line in the starter and next-steps (the SDK reads the

@@ -80,3 +80,32 @@ jobs:
       - name: import check
         working-directory: cendor-sdk
         run: uv run python -c "import cendor.sdk; print('import cendor.sdk OK', cendor.sdk.__version__)"
+
+  # cendor-init is a SELF-CONTAINED, dependency-light package (stdlib only + dev tooling) living in
+  # this repo but deliberately outside the uv workspace. It has no cendor-* deps, so it needs no
+  # sibling checkout / PyPI decision dance — a plain `uv sync --extra dev` is enough. This job makes
+  # its 25 tests + ruff actually run on every push (previously they ran nowhere; the twin drift class
+  # this pin guards against was latent only because CI never linted it).
+  cendor-init:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: cendor-init
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: sync (dev extras)
+        run: uv sync --extra dev
+      - name: ruff lint
+        run: uv run ruff check .
+      - name: ruff format check
+        run: uv run ruff format --check .
+      - name: type-check
+        run: uv run mypy src
+      - name: tests
+        run: uv run pytest -q
