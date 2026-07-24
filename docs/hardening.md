@@ -119,7 +119,10 @@ The checkpoint is a local JSON file written atomically (temp + replace). A finis
 `done`, so a subsequent call starts fresh. Multi-agent teams checkpoint the same way —
 `run([entry, peer, ...], input, checkpoint="team.ckpt.json")` persists per turn/segment — and a
 run that ended without a final answer reports it via
-[`Result.incomplete`](agents.md#result--the-receipt).
+[`Result.incomplete`](agents.md#result--the-receipt). **Streamed runs checkpoint too:** both
+`run.stream` (sync) and `run.astream` (async), single-agent or team, persist per turn as the stream
+progresses, and a finished stream done-resumes to a lone terminal `RunComplete` — no earlier deltas
+are re-emitted.
 
 `checkpoint=` accepts a path (auto-wrapped) or a `Checkpointer` instance — pass the class directly
 when you want the handle (to inspect `resumable_messages()` or `clear()` it):

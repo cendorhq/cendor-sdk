@@ -150,6 +150,15 @@ result = await parallelAsync([a, b, c], 'Same task, three takes');
 > `(agents, input, opts)` shape. `sequential` / `parallel` / `parallelAsync` above are the pipeline
 > forms; `runAgents` is the handoff-team runner.
 
+> **What each shape honours.** Every multi-agent shape accepts per-run governance: `audit`,
+> `max_turns`, `retry`, `on_step`, and `guardrails` (a per-run override of each agent's own list;
+> decisions collected into `result.guardrail_decisions`). **`session` and `checkpoint` are
+> team-only** — the handoff team (`run([...])` / `runAgents`) and `supervisor` persist and resume a
+> single canonical conversation, but `sequential` / `parallel` / `parallel_async` pipe (or fan out)
+> over independent per-agent inputs, so there is no one conversation to persist; they accept neither.
+> `guardrail_mode` (`"parallel"`) is a single-agent-run option — team and pipeline shapes always gate
+> in blocking mode. Behaviour is identical in both languages.
+
 ### Per-agent budgets & attribution
 
 <!-- tabs: lang -->
@@ -232,5 +241,9 @@ shared `AuditLog` chain and the per-segment `decision()` that correlates each ag
   discovery — by design, so the audit tree is always closed over a known set.
 - **`parallel` fans out over the same input** — it isn't a task queue or a scheduler; real
   distributed execution is your infrastructure's job.
+- **`session`/`checkpoint` are team-only; `guardrail_mode` is single-agent-only.** The pipeline
+  shapes (`sequential`/`parallel`/`parallel_async`) honour `audit`/`max_turns`/`retry`/`on_step`/
+  `guardrails`, but not `session`/`checkpoint` (no single conversation to persist or resume) — use a
+  handoff team (`run([...])`/`supervisor`) when you need persistence or resume.
 - **A handoff carries the whole canonical conversation.** Long trajectories can get expensive
   per segment — bound them with `context_budget` or per-agent budgets.

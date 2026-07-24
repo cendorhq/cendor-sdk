@@ -137,6 +137,7 @@ def run_agents(
     checkpoint: Any = None,
     on_step: Any = None,
     guardrails: list | None = None,
+    retry: Any = None,
 ) -> Result:
     """Run a handoff/supervised team: ``agents[0]`` is the entry; peers are reached by handoff.
 
@@ -145,6 +146,8 @@ def run_agents(
     ``checkpoint`` (a path or ``Checkpointer``) persists the trajectory after each turn/segment so a
     crashed multi-agent run resumes without re-doing completed work. ``guardrails`` (if given)
     overrides every segment's list; otherwise each agent gates with its own ``Agent(guardrails=…)``.
+    ``retry`` (a :class:`~cendor.sdk.RetryPolicy`, if given) retries each segment's transient model
+    calls.
     """
     from .checkpoint import _as_checkpointer
 
@@ -191,6 +194,7 @@ def run_agents(
                 tools=tools,
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
+                retry=retry,
                 on_turn=on_turn,
                 on_step=on_step,
                 guardrails=guardrails,
@@ -229,6 +233,7 @@ async def run_agents_async(
     checkpoint: Any = None,
     on_step: Any = None,
     guardrails: list | None = None,
+    retry: Any = None,
 ) -> Result:
     """Async counterpart of :func:`run_agents` (same segment/turn checkpointing)."""
     from .checkpoint import _as_checkpointer
@@ -276,6 +281,7 @@ async def run_agents_async(
                 tools=tools,
                 resolve=tool_map.get,
                 handoff_targets=transfer_map,
+                retry=retry,
                 on_turn=on_turn,
                 on_step=on_step,
                 guardrails=guardrails,
@@ -311,67 +317,155 @@ def supervisor(
     *,
     audit: Any = None,
     max_turns: int | None = None,
+    session: Any = None,
+    checkpoint: Any = None,
+    on_step: Any = None,
+    guardrails: list | None = None,
+    retry: Any = None,
 ) -> Result:
-    """A coordinator agent that routes to sub-agents via handoff (router pattern)."""
+    """A coordinator agent that routes to sub-agents via handoff (router pattern).
+
+    Delegates to :func:`run_agents`, so it honours the full team surface — ``session`` (conversation
+    scope + persistence), ``checkpoint`` (resume), ``on_step``, ``guardrails`` (per-run override +
+    ``Result.guardrail_decisions``), and ``retry`` — exactly as the TypeScript ``supervisor`` rides
+    ``runAgents``.
+    """
     existing = [_handoff_name(h) for h in coordinator.handoffs]
     names = [a.name for a in agents]
     coordinator.handoffs = list(dict.fromkeys([*existing, *names]))
-    return run_agents([coordinator, *agents], input, audit=audit, max_turns=max_turns)
+    with _gr.collecting():  # supervisor builds its Result (via run_agents) inside this scope
+        return run_agents(
+            [coordinator, *agents],
+            input,
+            audit=audit,
+            max_turns=max_turns,
+            session=session,
+            checkpoint=checkpoint,
+            on_step=on_step,
+            guardrails=guardrails,
+            retry=retry,
+        )
 
 
 # --------------------------------------------------------------------------- sequential / parallel
 
 
 def sequential(
-    agents: list[Agent], input: Any, *, audit: Any = None, max_turns: int | None = None
+    agents: list[Agent],
+    input: Any,
+    *,
+    audit: Any = None,
+    max_turns: int | None = None,
+    retry: Any = None,
+    on_step: Any = None,
+    guardrails: list | None = None,
 ) -> Result:
-    """Run agents in order, piping each agent's output as the next agent's input."""
+    """Run agents in order, piping each agent's output as the next agent's input.
+
+    Honours the per-run governance surface: ``audit``, ``max_turns``, ``retry``, ``on_step``, and
+    ``guardrails`` (a per-run override of every agent's list; decisions collected into
+    ``Result.guardrail_decisions``). ``session`` / ``checkpoint`` are team-only (``run_agents`` /
+    ``supervisor``) — a pipe has no single conversation to persist or resume (parity with TS).
+    """
     parent = uuid.uuid4().hex
     steps: list = []
     seen: list[str] = []
     messages_all: list[dict] = []
     current: Any = input
     output: Any = None
-    for i, agent in enumerate(agents):
-        seen.append(agent.name)
-        child = f"{parent}:{agent.name}#{i}"
-        msgs = [_user_message(current)]
-        with _scope(agent):
-            output, seg_steps, _ = run_agent_sync(
-                agent, msgs, child, audit=audit, max_turns=max_turns
-            )
-        steps.extend(seg_steps)
-        messages_all.extend(msgs)
-        current = output
-    return Result(output=output, steps=steps, trace_id=parent, agents=seen, messages=messages_all)
+    with _gr.collecting():  # collect decisions for Result.guardrail_decisions
+        for i, agent in enumerate(agents):
+            seen.append(agent.name)
+            child = f"{parent}:{agent.name}#{i}"
+            msgs = [_user_message(current)]
+            with _scope(agent):
+                output, seg_steps, _ = run_agent_sync(
+                    agent,
+                    msgs,
+                    child,
+                    audit=audit,
+                    max_turns=max_turns,
+                    retry=retry,
+                    on_step=on_step,
+                    guardrails=guardrails,
+                )
+            steps.extend(seg_steps)
+            messages_all.extend(msgs)
+            current = output
+        return Result(
+            output=output,
+            steps=steps,
+            trace_id=parent,
+            agents=seen,
+            messages=messages_all,
+            guardrail_decisions=_gr.snapshot(),
+        )
 
 
 def parallel(
-    agents: list[Agent], input: Any, *, audit: Any = None, max_turns: int | None = None
+    agents: list[Agent],
+    input: Any,
+    *,
+    audit: Any = None,
+    max_turns: int | None = None,
+    retry: Any = None,
+    on_step: Any = None,
+    guardrails: list | None = None,
 ) -> Result:
     """Run agents independently on the same input; ``result.output`` is ``{agent_name: output}``.
 
-    Sync execution is sequential; use :func:`parallel_async` for real concurrency.
+    Sync execution is sequential; use :func:`parallel_async` for real concurrency. Honours the same
+    per-run governance surface as :func:`sequential` (``audit`` / ``max_turns`` / ``retry`` /
+    ``on_step`` / ``guardrails`` → ``Result.guardrail_decisions``); ``session`` / ``checkpoint`` are
+    team-only.
     """
     parent = uuid.uuid4().hex
     steps: list = []
     outputs: dict[str, Any] = {}
-    for i, agent in enumerate(agents):
-        child = f"{parent}:{agent.name}#{i}"
-        msgs = [_user_message(input)]
-        with _scope(agent):
-            out, seg_steps, _ = run_agent_sync(agent, msgs, child, audit=audit, max_turns=max_turns)
-        steps.extend(seg_steps)
-        outputs[agent.name] = out
-    return Result(
-        output=outputs, steps=steps, trace_id=parent, agents=[a.name for a in agents], messages=[]
-    )
+    with _gr.collecting():  # collect decisions for Result.guardrail_decisions
+        for i, agent in enumerate(agents):
+            child = f"{parent}:{agent.name}#{i}"
+            msgs = [_user_message(input)]
+            with _scope(agent):
+                out, seg_steps, _ = run_agent_sync(
+                    agent,
+                    msgs,
+                    child,
+                    audit=audit,
+                    max_turns=max_turns,
+                    retry=retry,
+                    on_step=on_step,
+                    guardrails=guardrails,
+                )
+            steps.extend(seg_steps)
+            outputs[agent.name] = out
+        return Result(
+            output=outputs,
+            steps=steps,
+            trace_id=parent,
+            agents=[a.name for a in agents],
+            messages=[],
+            guardrail_decisions=_gr.snapshot(),
+        )
 
 
 async def parallel_async(
-    agents: list[Agent], input: Any, *, audit: Any = None, max_turns: int | None = None
+    agents: list[Agent],
+    input: Any,
+    *,
+    audit: Any = None,
+    max_turns: int | None = None,
+    retry: Any = None,
+    on_step: Any = None,
+    guardrails: list | None = None,
 ) -> Result:
-    """Run agents concurrently on the same input (real fan-out); output is ``{name: output}``."""
+    """Run agents concurrently on the same input (real fan-out); output is ``{name: output}``.
+
+    Honours the same per-run governance surface as :func:`sequential`. The ``guardrails`` decisions
+    of every concurrently-gathered agent are collected into ``Result.guardrail_decisions`` (the
+    ``collecting`` box is a shared mutable list the gathered tasks inherit — concurrency-correct);
+    ``session`` / ``checkpoint`` are team-only.
+    """
     parent = uuid.uuid4().hex
 
     async def _one(i: int, agent: Agent) -> tuple[str, Any, list]:
@@ -379,16 +473,29 @@ async def parallel_async(
         msgs = [_user_message(input)]
         with _scope(agent):
             out, seg_steps, _ = await run_agent_async(
-                agent, msgs, child, audit=audit, max_turns=max_turns
+                agent,
+                msgs,
+                child,
+                audit=audit,
+                max_turns=max_turns,
+                retry=retry,
+                on_step=on_step,
+                guardrails=guardrails,
             )
         return agent.name, out, seg_steps
 
-    results = await asyncio.gather(*(_one(i, a) for i, a in enumerate(agents)))
-    steps: list = []
-    outputs: dict[str, Any] = {}
-    for name, out, seg_steps in results:
-        outputs[name] = out
-        steps.extend(seg_steps)
-    return Result(
-        output=outputs, steps=steps, trace_id=parent, agents=[a.name for a in agents], messages=[]
-    )
+    with _gr.collecting():  # collect decisions for Result.guardrail_decisions
+        results = await asyncio.gather(*(_one(i, a) for i, a in enumerate(agents)))
+        steps: list = []
+        outputs: dict[str, Any] = {}
+        for name, out, seg_steps in results:
+            outputs[name] = out
+            steps.extend(seg_steps)
+        return Result(
+            output=outputs,
+            steps=steps,
+            trace_id=parent,
+            agents=[a.name for a in agents],
+            messages=[],
+            guardrail_decisions=_gr.snapshot(),
+        )

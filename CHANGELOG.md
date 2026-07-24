@@ -4,6 +4,37 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] — 2026-07-24
+Findings-closure wave — a fix for streamed-async checkpointing and multi-agent pipeline-shape
+governance parity with the TypeScript SDK. Backwards-compatible (new keyword-only options preserve
+today's behaviour); no `cendor-core` changes.
+
+### Fixed
+- **`run.astream(checkpoint=…)` now persists (it was accepted but not applied).** The async
+  streaming entry point took a `checkpoint=` argument and its docstring promised the same S13
+  semantics as `run.stream`, but the argument was never forwarded to `stream_agent_async` /
+  `stream_agents_async` — so streamed-async checkpointing was silently a no-op. It now saves per turn
+  (single agent) / per turn + segment (team) and done-resumes to a lone terminal `RunComplete`,
+  matching `run.stream` and the TypeScript twin. Covered by a red-first async test (the twin of the
+  sync S13 tests).
+
+### Added
+- **Pipeline-shape governance parity (TS-observed).** `sequential` / `parallel` / `parallel_async`
+  now accept the honoured per-run surface — `retry`, `on_step`, and `guardrails` (a per-run override
+  of each agent's list; decisions collected into `Result.guardrail_decisions`) — in addition to
+  `audit` / `max_turns`. `supervisor` gains `session`, `checkpoint`, `on_step`, `guardrails`, and
+  `retry`, delegating to `run_agents` exactly as the TypeScript `supervisor` rides `runAgents`
+  (`run_agents` / `run_agents_async` also forward `retry` now). This mirrors the TypeScript behaviour
+  1:1.
+
+### Honest limits
+- **`session` / `checkpoint` are team-only; `guardrail_mode` is single-agent-only.** The pipeline
+  shapes (`sequential` / `parallel` / `parallel_async`) pipe or fan out over independent per-agent
+  inputs — there is no single conversation to persist or resume — so they don't take `session` /
+  `checkpoint`; use a handoff team (`run([...])`) or `supervisor` for that. `guardrail_mode`
+  (`"parallel"`) applies only to single-agent runs; team and pipeline shapes always gate in blocking
+  mode. Both languages behave the same (see [`multi-agent.md`](docs/multi-agent.md)).
+
 ## [1.16.0] — 2026-07-24
 SDK telemetry wave — structural signals for RAG, memory, orchestration, checkpoints, tools, and MCP
 become first-class `cendor.sdk` spans, so an OTel backend (or Cendor Monitor) renders each as its own

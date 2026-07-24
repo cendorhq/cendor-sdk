@@ -1565,11 +1565,21 @@ class _Run:
         # stay confined to the task and never leak into the consumer between deltas.
         if isinstance(agent, (list, tuple)):
             agen = stream_agents_async(
-                list(agent), input, session=session, audit=audit, max_turns=max_turns
+                list(agent),
+                input,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                checkpoint=checkpoint,
             )
         else:
             agen = stream_agent_async(
-                agent, input, session=session, audit=audit, max_turns=max_turns
+                agent,
+                input,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                checkpoint=checkpoint,
             )
         return _drive_async(agen)
 
