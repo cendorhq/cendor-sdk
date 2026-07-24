@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from . import _telemetry as _tel
 from .providers import _get
 from .tools import Tool
 
@@ -41,7 +42,7 @@ def _mcp_result_text(result: Any) -> str:
     return "\n".join(parts) if parts else str(content)
 
 
-def _wrap_mcp_tool(session: Any, spec: Any) -> Tool:
+def _wrap_mcp_tool(session: Any, spec: Any, server: str = "", transport: str = "") -> Tool:
     name = _get(spec, "name") or "tool"
     description = _get(spec, "description") or ""
     schema = (
@@ -57,20 +58,32 @@ def _wrap_mcp_tool(session: Any, spec: Any) -> Tool:
         result = await session.call_tool(name, kwargs)
         return _mcp_result_text(result)
 
-    return Tool(name=name, description=description, parameters=schema, func=call, is_async=True)
+    tool = Tool(name=name, description=description, parameters=schema, func=call, is_async=True)
+    # E-wave: record source so a tool span carries cendor.tool.source="mcp" (+ server/transport).
+    _tel.register_tool_source(name, "mcp", server=server, transport=transport)
+    return tool
 
 
-async def load_mcp_tools(session: Any) -> list[Tool]:
+async def load_mcp_tools(session: Any, *, server: str = "", transport: str = "") -> list[Tool]:
     """List an MCP session's tools and return them as governed ``Tool``s.
 
     ``session`` is any object with async ``list_tools()`` (returning something with a ``.tools``
     list, or a list directly) and ``call_tool(name, arguments)``.
+
+    ``server`` / ``transport`` are optional, non-secret **attribution labels** (e.g. ``"github"`` /
+    ``"stdio"``). When given, each tool's spans carry ``cendor.tool.source="mcp"`` + the server,
+    and the SDK emits ``mcp.connect`` (first contact) / ``mcp.list_tools`` ``cendor.sdk`` spans so a
+    monitor can attribute calls per server. Omitting them still works — the tools are just tagged
+    ``source="mcp"`` with no server identity. Content-free: only labels + counts.
     """
     listing = await session.list_tools()
     specs = _get(listing, "tools")
     if specs is None:
         specs = listing if isinstance(listing, list) else []
-    return [_wrap_mcp_tool(session, spec) for spec in specs]
+    tools = [_wrap_mcp_tool(session, spec, server, transport) for spec in specs]
+    _tel.mcp_connect_once(server, transport)
+    _tel.mcp_span("mcp.list_tools", server=server, transport=transport, tool_count=len(tools))
+    return tools
 
 
 async def load_mcp_prompts(session: Any) -> dict[str, Any]:

@@ -68,6 +68,61 @@ built post-hoc from `span_tree` instead still links by `cendor.audit.run_id` (Ce
 id). So a trace-aware tool such as Cendor Monitor can open a run and show every verdict on the exact
 step it governed — see [Correlate audit entries with your traces](/docs/observability#correlate-audit-entries-with-your-traces).
 
+## Structural signals — RAG, memory, orchestration, tools, MCP
+
+Beyond the `chat`/`execute_tool` tree, the SDK emits a `cendor.sdk` span for each of its **structural**
+signals, so a backend renders them as first-class domains (Cendor Monitor gives each its own view).
+These are automatic — they ride the same `live_spans()` / `liveSpans` scope, opt-in and content-free
+(ids, labels, and counts only; never message bodies). Available in `cendor-sdk` ≥ 1.16 / `@cendor/sdk`
+≥ 0.21.
+
+| Span | Emitted when | Carries |
+|---|---|---|
+| `rag.assemble` | `context_budget` assembly runs | budget/used, blocks kept vs dropped, token deltas |
+| `rag.compress` | squeeze compresses a block | technique, tokens before/after, ratio |
+| `memory.load` / `memory.save` | a run reads / writes a `Session` | session id, turn count, byte size |
+| `orchestration.handoff` | one agent hands off to another | from-agent, to-agent, segment, transfer tool |
+| `checkpoint.save` / `checkpoint.resume` | a `Checkpointer` writes / a run resumes | run id, done flag, turn count |
+| `execute_tool …` (now) | any tool call | `cendor.tool.source` (`local`\|`mcp`), `cendor.tool.outcome` (`ok`\|`error`\|`blocked`) |
+
+A tool the `tool_call` guardrail **blocks** never runs, so it emits no ordinary tool span — the SDK
+emits a dedicated `execute_tool {name}` span with `cendor.tool.outcome="blocked"` and the guardrail
+name in `cendor.tool.blocked_by` (never the reason text), so a blocked call is still visible.
+
+**MCP server attribution.** Pass the (non-secret) server name + transport to `load_mcp_tools` and every
+tool from that server is tagged `cendor.tool.source="mcp"` with the server on its spans, plus
+`mcp.connect` / `mcp.list_tools` lifecycle spans so a monitor can attribute calls per server:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import Agent
+from cendor.sdk.mcp import load_mcp_tools
+
+# `session` is your connected MCP client session. server/transport are non-secret labels.
+tools = await load_mcp_tools(session, server="github", transport="stdio")
+agent = Agent(name="assistant", model="gpt-4o", tools=tools)
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { Agent, loadMcpTools } from '@cendor/sdk';
+
+// `session` is your connected MCP client (e.g. @modelcontextprotocol/sdk's Client — duck-typed here).
+declare const session: {
+  listTools(): Promise<unknown>;
+  callTool(name: string, args: Record<string, unknown>): Promise<unknown>;
+};
+
+// server/transport are non-secret attribution labels — tools' spans get cendor.tool.source="mcp".
+const tools = await loadMcpTools(session, { server: 'github', transport: 'stdio' });
+const agent = new Agent({ name: 'assistant', model: 'gpt-4o', tools });
+```
+
+<!-- /tabs -->
+
 ## Watch it in Cendor Monitor
 
 [**Cendor Monitor**](/docs/monitor) is the optional, self-hosted monitor that renders these SDK runs

@@ -157,6 +157,9 @@ def span_tree(
                             s.set_attribute("gen_ai.agent.name", agent_name)
                             s.set_attribute("cendor.step", step_no)
                             _set_tool_attrs(s, step.call)
+                            for k, v in _tool_source_attrs(step.name).items():  # E-wave source
+                                s.set_attribute(k, v)
+                            s.set_attribute("cendor.tool.outcome", _tool_outcome(step.call))
                             for k, v in _tool_content_attrs(step.call).items():  # G17
                                 s.set_attribute(k, v)
     return True
@@ -199,6 +202,122 @@ def _set_tool_attrs(span: Any, call: Any) -> None:
         inner = args.get("kwargs") if isinstance(args.get("kwargs"), dict) else args
         if isinstance(inner, dict) and inner:
             span.set_attribute("gen_ai.tool.arg_names", ",".join(sorted(map(str, inner))))
+
+
+def _tool_source_attrs(name: str) -> dict[str, Any]:
+    """Source attribution for a tool span — ``local`` unless it was wrapped from an MCP server
+    (E-wave: :func:`cendor.sdk._telemetry.register_tool_source`). Labels only, no bodies."""
+    from . import _telemetry as _tel
+
+    src = _tel.tool_source(name) or {}
+    attrs: dict[str, Any] = {"cendor.tool.source": src.get("source", "local")}
+    if src.get("server"):
+        attrs["cendor.tool.mcp.server"] = src["server"]
+    if src.get("transport"):
+        attrs["cendor.tool.mcp.transport"] = src["transport"]
+    return attrs
+
+
+def _tool_outcome(call: Any) -> str:
+    """Derive a tool call's outcome (``ok`` | ``error``) from the runner's own result convention —
+    a failed tool returns ``"[error] …"`` (runner._exec_tool_*). Computed in-process from the
+    result value; only the ``ok``/``error`` LABEL lands on the span, never the result text."""
+    result = getattr(call, "result", None)
+    return "error" if isinstance(result, str) and result.startswith("[error]") else "ok"
+
+
+# --- E-wave domain spans (RAG / memory / orchestration / checkpoints / blocked tools) ------------
+# Rendered by ``live_spans`` from bus events (see _telemetry.py). Each returns (span_name, attrs);
+# every attrs dict carries ``cendor.sdk.kind`` so the monitor can switch on it robustly.
+
+
+def _rag_assemble_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    decisions = list(getattr(ev, "decisions", None) or [])
+    kept = sum(1 for d in decisions if getattr(d, "action", "") == "kept")
+    dropped = sum(1 for d in decisions if getattr(d, "action", "") == "dropped")
+    before = sum(int(getattr(d, "tokens_before", 0) or 0) for d in decisions)
+    after = sum(int(getattr(d, "tokens_after", 0) or 0) for d in decisions)
+    return "rag.assemble", {
+        "cendor.sdk.kind": "rag.assemble",
+        "gen_ai.operation.name": "rag.assemble",
+        "cendor.rag.budget": int(getattr(ev, "budget", 0) or 0),
+        "cendor.rag.used": int(getattr(ev, "used", 0) or 0),
+        "cendor.rag.reserved_output": int(getattr(ev, "reserved_output", 0) or 0),
+        "cendor.rag.model": str(getattr(ev, "model", "") or ""),
+        "cendor.rag.blocks": len(decisions),
+        "cendor.rag.kept": kept,
+        "cendor.rag.dropped": dropped,
+        "cendor.rag.tokens_before": before,
+        "cendor.rag.tokens_after": after,
+    }
+
+
+def _rag_compress_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    return "rag.compress", {
+        "cendor.sdk.kind": "rag.compress",
+        "gen_ai.operation.name": "rag.compress",
+        "cendor.rag.technique": str(getattr(ev, "technique", "") or ""),
+        "cendor.rag.tokens_before": int(getattr(ev, "tokens_before", 0) or 0),
+        "cendor.rag.tokens_after": int(getattr(ev, "tokens_after", 0) or 0),
+        "cendor.rag.ratio": str(getattr(ev, "ratio", "") or ""),
+        "cendor.rag.store_kind": str(getattr(ev, "store_kind", "") or ""),
+        "cendor.rag.kind": str(getattr(ev, "kind", "") or ""),
+    }
+
+
+def _memory_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    name = f"memory.{ev.op}"
+    attrs: dict[str, Any] = {
+        "cendor.sdk.kind": name,
+        "gen_ai.operation.name": name,
+        "cendor.memory.op": ev.op,
+        "cendor.memory.turns": int(ev.turns),
+        "cendor.memory.bytes": int(ev.bytes),
+    }
+    if ev.session_id:
+        attrs["cendor.memory.session_id"] = ev.session_id
+        attrs["gen_ai.conversation.id"] = ev.session_id
+    return name, attrs
+
+
+def _checkpoint_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    name = f"checkpoint.{ev.op}"
+    attrs: dict[str, Any] = {
+        "cendor.sdk.kind": name,
+        "gen_ai.operation.name": name,
+        "cendor.checkpoint.op": ev.op,
+        "cendor.checkpoint.done": bool(ev.done),
+        "cendor.checkpoint.turns": int(ev.turns),
+    }
+    if ev.segment is not None:
+        attrs["cendor.checkpoint.segment"] = int(ev.segment)
+    return name, attrs
+
+
+def _handoff_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    return "orchestration.handoff", {
+        "cendor.sdk.kind": "orchestration.handoff",
+        "gen_ai.operation.name": "orchestration.handoff",
+        "cendor.orch.from_agent": ev.from_agent,
+        "cendor.orch.to_agent": ev.to_agent,
+        "cendor.orch.segment": int(ev.segment),
+        "cendor.orch.transfer_tool": ev.transfer_tool,
+    }
+
+
+def _tool_blocked_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
+    name = f"execute_tool {ev.name}"
+    attrs: dict[str, Any] = {
+        "cendor.sdk.kind": "execute_tool",
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": ev.name,
+        "cendor.tool.outcome": "blocked",
+        "cendor.tool.blocked_by": ev.blocked_by,
+        **_tool_source_attrs(ev.name),
+    }
+    if ev.agent:
+        attrs["gen_ai.agent.name"] = ev.agent
+    return name, attrs
 
 
 @contextmanager
@@ -245,10 +364,20 @@ def live_spans(
     import time
     from decimal import Decimal
 
-    from cendor.core import bus
+    from cendor.core import bus, current_trace_id
     from cendor.core import otel as _co
 
     from ._governance import current_agent, current_conversation
+
+    # E-wave: bus event class → attrs builder (RAG rides library events; the rest are SDK events).
+    _DOMAIN_BUILDERS = {
+        "AssemblyReport": _rag_assemble_attrs,
+        "CompressionEvent": _rag_compress_attrs,
+        "MemoryOp": _memory_attrs,
+        "CheckpointEvent": _checkpoint_attrs,
+        "OrchestrationEdge": _handoff_attrs,
+        "ToolGate": _tool_blocked_attrs,
+    }
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
     _co.enter_live_spans()  # G20: the core bus→span emitter stands down while we own the spans
@@ -269,22 +398,46 @@ def live_spans(
         family = ""  # the run-family root, learned from the first event (GLR-3)
         agents_seen: dict[str, None] = {}  # ordered-unique agent names → cendor.run.agents (G-V4-2)
 
-        def on_event(ev: Any) -> None:
-            nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set, family
-            if not isinstance(ev, (LLMCall, ToolCall)):
-                return
-            trace_id = getattr(ev, "trace_id", "") or ""
+        def _learn_and_filter(trace_id: str) -> bool:
+            """Learn the run-family root from the first event; reject foreign runs (GLR-3). The
+            family is the segment before the first ``:`` (orchestration segments are
+            ``{parent}:{agent}#{seg}``; a single-agent run is the bare run id) — matches the
+            collector's match + the monitor's key. Returns ``False`` if the event is foreign."""
+            nonlocal family, run_id_set
             if not run_id_set and trace_id:
-                # Learn the run-family root from the first observed event: the segment before the
-                # first ":" (orchestration segments are ``{parent}:{agent}#{seg}``; a single-agent
-                # run is the bare run id) — matches the collector's match + the monitor's key.
                 family = trace_id.split(":", 1)[0]
                 root.set_attribute("cendor.run.id", family)
                 root.set_attribute("cendor.trace_id", family)
                 run_id_set = True
-            # GLR-3: render only events from THIS run family — a concurrent run sharing the process
-            # bus must not pollute this run's steps / rollups / children.
-            if family and trace_id != family and not trace_id.startswith(family + ":"):
+            return not (family and trace_id != family and not trace_id.startswith(family + ":"))
+
+        def _domain_span(ev: Any, builder: Any) -> None:
+            """Render an E-wave domain event (RAG/memory/orchestration/checkpoint/blocked-tool) as a
+            ``cendor.sdk`` child span, correlated by trace_id. ``AssemblyReport`` carries no
+            trace_id — read the ambient run scope (``bus.emit`` is a synchronous same-thread fanout,
+            so the emitting call's ``trace()`` scope is still active)."""
+            trace_id = getattr(ev, "trace_id", "") or current_trace_id() or ""
+            if not _learn_and_filter(trace_id):
+                return
+            name, attrs = builder(ev)
+            now = time.time_ns()
+            span = tracer.start_span(name, context=ctx, start_time=now)
+            span.set_attribute("cendor.trace_id", trace_id)
+            for k, v in attrs.items():
+                if v is not None:
+                    span.set_attribute(k, v)
+            span.end(end_time=now)
+
+        def on_event(ev: Any) -> None:
+            nonlocal step_no, total_input, total_output, total_cost, run_id_set, conv_set, family
+            builder = _DOMAIN_BUILDERS.get(type(ev).__name__)
+            if builder is not None:  # E-wave: a new structural SDK/RAG signal
+                _domain_span(ev, builder)
+                return
+            if not isinstance(ev, (LLMCall, ToolCall)):
+                return
+            trace_id = getattr(ev, "trace_id", "") or ""
+            if not _learn_and_filter(trace_id):
                 return
             if not conv_set:
                 # G19: prefer the conversation id stamped on the event at construction (GLR-2 —
@@ -341,6 +494,9 @@ def live_spans(
                 if agent:
                     span.set_attribute("gen_ai.agent.name", agent)
                 _set_tool_attrs(span, ev)
+                for k, v in _tool_source_attrs(ev.name).items():  # E-wave: local vs mcp + server
+                    span.set_attribute(k, v)
+                span.set_attribute("cendor.tool.outcome", _tool_outcome(ev))  # ok | error
                 for k, v in _tool_content_attrs(ev).items():  # G17
                     span.set_attribute(k, v)
             span.end(end_time=end)

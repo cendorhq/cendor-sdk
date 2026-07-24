@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from . import _telemetry as _tel
+
 
 class Checkpointer:
     """Persist and restore run state to a local JSON file.
@@ -45,12 +47,28 @@ class Checkpointer:
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
         tmp.replace(self.path)
+        # E-wave: checkpoint.save span (correlated by the run id carried in the state itself).
+        _tel.emit_checkpoint(
+            "save",
+            str(state.get("run_id") or ""),
+            done=bool(state.get("done")),
+            turns=len(state.get("messages") or []),
+            segment=state.get("seg"),
+        )
 
     def resumable_messages(self) -> list[dict] | None:
         """Saved messages to resume from, or ``None`` if there's no unfinished checkpoint."""
         state = self.load()
         if state and not state.get("done"):
-            return list(state.get("messages") or [])
+            msgs = list(state.get("messages") or [])
+            _tel.emit_checkpoint(  # E-wave: checkpoint.resume span (unfinished — continue the run)
+                "resume",
+                str(state.get("run_id") or ""),
+                done=False,
+                turns=len(msgs),
+                segment=state.get("seg"),
+            )
+            return msgs
         return None
 
     def finished(self) -> dict[str, Any] | None:
@@ -61,6 +79,13 @@ class Checkpointer:
         """
         state = self.load()
         if state and state.get("done"):
+            _tel.emit_checkpoint(  # E-wave: checkpoint.resume span (finished — no model call)
+                "resume",
+                str(state.get("run_id") or ""),
+                done=True,
+                turns=len(state.get("messages") or []),
+                segment=state.get("seg"),
+            )
             return state
         return None
 

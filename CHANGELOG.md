@@ -4,6 +4,38 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] — 2026-07-24
+SDK telemetry wave — structural signals for RAG, memory, orchestration, checkpoints, tools, and MCP
+become first-class `cendor.sdk` spans, so an OTel backend (or Cendor Monitor) renders each as its own
+domain. **Zero core changes** — the new signals ride `cendor-core`'s bus and the existing
+`live_spans()` scope; content rules are unchanged (labels/ids/counts only, never message bodies).
+
+### Added
+- **RAG spans (`rag.assemble` / `rag.compress`):** an always-on retriever's `context_budget` assembly
+  (contextkit `AssemblyReport`) and squeeze compression (`CompressionEvent`) now surface as `cendor.sdk`
+  child spans inside a `live_spans()` run — budget/used, blocks kept vs dropped, token deltas, technique.
+- **Memory spans (`memory.load` / `memory.save`):** a run that reads/writes a `Session` emits a span
+  carrying the session id, turn count, and byte size.
+- **Orchestration handoff spans (`orchestration.handoff`):** each `transfer_to_<peer>` handoff emits an
+  edge (from-agent → to-agent, segment, transfer tool) so a monitor reconstructs the multi-agent graph
+  from rows rather than parsing trace-id families.
+- **Checkpoint spans (`checkpoint.save` / `checkpoint.resume`):** a `Checkpointer` write and a resume
+  decision (finished or unfinished) emit spans carrying the run id, done flag, and turn count.
+- **Tool source + outcome:** every `execute_tool` span now carries `cendor.tool.source`
+  (`local` | `mcp`, + `cendor.tool.mcp.server`/`transport`) and `cendor.tool.outcome`
+  (`ok` | `error` | `blocked`). A `tool_call` guardrail **block** — which runs no tool and so emits no
+  `ToolCall` — now emits a dedicated `execute_tool {name}` span with `outcome="blocked"` +
+  `cendor.tool.blocked_by` (the guardrail name; never the reason text).
+- **MCP server attribution:** `load_mcp_tools(session, server=…, transport=…)` tags each tool's spans
+  with the MCP server + transport and emits `mcp.connect` / `mcp.list_tools` lifecycle spans, so a
+  monitor attributes tool calls per server. The labels are optional and non-secret.
+
+### Honest limits
+- The new domain telemetry rides the **live** path (`live_spans`); the post-hoc `span_tree` continues
+  to render the LLM/tool tree from `Result` (and now also stamps tool source/outcome).
+- The tool-source registry is process-global; a tool-name collision across two MCP servers is
+  last-writer-wins.
+
 ## [1.15.0] — 2026-07-23
 Phase-S follow-up — the parity items deferred from 1.14 land, both languages, on the same
 `cendor-core` 1.10 / `cendor-tokenguard` 1.5 shelf (no new floor).

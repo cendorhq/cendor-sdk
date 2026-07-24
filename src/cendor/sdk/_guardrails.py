@@ -29,6 +29,8 @@ from cendor.guardrails import Context, GuardrailDecision, GuardrailTripped
 from cendor.guardrails import evaluate as _evaluate
 from cendor.guardrails import evaluate_async as _evaluate_async
 
+from . import _telemetry as _tel
+
 #: The valid guardrail execution modes. ``blocking`` (default) runs input-stage guardrails before
 #: the first model call (a block is pre-spend, ``$0``). ``parallel`` overlaps them with the first
 #: model call for lower latency on the pass path — only worth it for slow tier-3/4 checks (an LLM
@@ -259,6 +261,8 @@ def gate_tool_call_sync(
         cleaned, decs = _evaluate(guardrails, "tool_call", tc.arguments, ctx)
     except GuardrailTripped as exc:
         _record(exc.decisions)
+        # E-wave: a pre-execution block yields no ToolCall on the bus, so emit the only signal.
+        _tel.emit_tool_blocked(tc.name, exc.decisions[-1].guardrail, run_id, agent.name)
         return _blocked_message(exc)
     _record(decs)
     tc.arguments = cleaned
@@ -282,6 +286,8 @@ async def gate_tool_call_async(
         cleaned, decs = await _evaluate_async(guardrails, "tool_call", tc.arguments, ctx)
     except GuardrailTripped as exc:
         _record(exc.decisions)
+        # E-wave: a pre-execution block yields no ToolCall on the bus, so emit the only signal.
+        _tel.emit_tool_blocked(tc.name, exc.decisions[-1].guardrail, run_id, agent.name)
         return _blocked_message(exc)
     _record(decs)
     tc.arguments = cleaned

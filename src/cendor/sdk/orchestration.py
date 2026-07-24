@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from . import _guardrails as _gr
+from . import _telemetry as _tel
 from ._governance import _conversation_scope, _scope
 from .agent import Agent
 from .result import Result
@@ -196,6 +197,7 @@ def run_agents(
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
+            _tel.emit_handoff(active.name, switched, seg, f"transfer_to_{switched}", parent)
             active = registry[switched]
             _save(False, seg + 1, active.name)
             continue
@@ -203,6 +205,7 @@ def run_agents(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, parent)  # E-wave: memory.save span
     _save(True, seg, active.name, output)
     return Result(
         output=_parse_output(output, active.output_type),
@@ -279,6 +282,7 @@ async def run_agents_async(
             )
         steps.extend(seg_steps)
         if switched and switched in registry:
+            _tel.emit_handoff(active.name, switched, seg, f"transfer_to_{switched}", parent)
             active = registry[switched]
             _save(False, seg + 1, active.name)
             continue
@@ -286,6 +290,7 @@ async def run_agents_async(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, parent)  # E-wave: memory.save span
     _save(True, seg, active.name, output)
     return Result(
         output=_parse_output(output, active.output_type),

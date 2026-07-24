@@ -19,10 +19,11 @@ from contextvars import ContextVar, copy_context
 from dataclasses import is_dataclass
 from typing import TYPE_CHECKING, Any
 
-from cendor.core import bus, trace
+from cendor.core import bus, current_trace_id, trace
 from cendor.core.types import LLMCall, ToolCall
 
 from . import _guardrails as _gr
+from . import _telemetry as _tel
 from ._governance import _conversation_scope, _scope
 from ._governance import current_agent as _current_agent
 from .providers import assistant_message, tool_result_message
@@ -112,6 +113,8 @@ def _safe_input(input: Any) -> Any:
 
 def _prepare_messages(agent: Agent, input: Any, session: Session | None) -> list[dict]:
     messages: list[dict] = list(session.snapshot()) if session is not None else []
+    if session is not None:  # E-wave: memory.load (single-agent path runs inside the trace scope)
+        _tel.emit_memory("load", session, current_trace_id() or "")
     if isinstance(input, str):
         messages.append({"role": "user", "content": input})
     elif isinstance(input, dict):
@@ -688,6 +691,7 @@ class Runner:
     def _finish(self, run_id: str, output: Any, steps: list, messages: list[dict]) -> Result:
         if self.session is not None:
             self.session.replace(messages)
+            _tel.emit_memory("save", self.session, run_id)  # E-wave: memory.save span
         if self.checkpoint is not None:
             self.checkpoint.save(
                 {"run_id": run_id, "messages": messages, "done": True, "output": output}
@@ -879,6 +883,7 @@ def stream_agent_sync(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, run_id)  # E-wave: memory.save span
     _save(True)  # S13: final done save
     steps = [_step(agent.name, e) for e in events]
     yield RunComplete(
@@ -998,6 +1003,7 @@ async def stream_agent_async(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, run_id)  # E-wave: memory.save span
     _save(True)  # S13: final done save
     steps = [_step(agent.name, e) for e in events]
     yield RunComplete(
@@ -1151,6 +1157,7 @@ def stream_agents_sync(
             steps.extend(_step(active.name, e) for e in events)
             run_decisions.extend(seg_decisions)
             if switched and switched in registry:
+                _tel.emit_handoff(active.name, switched, seg, f"transfer_to_{switched}", parent)
                 active = registry[switched]
                 _save(False, seg + 1, active.name)  # S13: checkpoint the handoff
                 continue
@@ -1158,6 +1165,7 @@ def stream_agents_sync(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, parent)  # E-wave: memory.save span
     _save(True, seg, active.name)  # S13: final done save
     yield RunComplete(
         Result(
@@ -1306,6 +1314,7 @@ async def stream_agents_async(
             steps.extend(_step(active.name, e) for e in events)
             run_decisions.extend(seg_decisions)
             if switched and switched in registry:
+                _tel.emit_handoff(active.name, switched, seg, f"transfer_to_{switched}", parent)
                 active = registry[switched]
                 _save(False, seg + 1, active.name)  # S13: checkpoint the handoff
                 continue
@@ -1313,6 +1322,7 @@ async def stream_agents_async(
 
     if session is not None:
         session.replace(messages)
+        _tel.emit_memory("save", session, parent)  # E-wave: memory.save span
     _save(True, seg, active.name)  # S13: final done save
     yield RunComplete(
         Result(
