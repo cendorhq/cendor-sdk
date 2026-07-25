@@ -332,3 +332,59 @@ def test_a_run_less_libs_call_is_not_adopted_into_a_run(global_otel):
         s for s in spans if s.parent is not None and s.parent.span_id == root.context.span_id
     ]
     assert [c.name for c in children] == ["chat gpt-4o-mini"]
+
+
+# ------------------------------------------------- governance precedence, under CONCURRENCY (§4.5)
+# The wave proved "the mirror wins" sequentially only. These two pin it with two runs in flight:
+# each decision must be rendered EXACTLY ONCE — never twice (mirror + ops span), never zero.
+
+
+def _budgeted(agent, audit, cap="0.0000001"):
+    from decimal import Decimal
+
+    from cendor import tokenguard
+
+    async def go():
+        with tokenguard.budget(usd=Decimal(cap), on_exceed="block", name="tiny"):
+            try:
+                await run.aio(agent, "hi", audit=audit)
+            except Exception:  # noqa: BLE001 — the block is the point
+                pass
+
+    return go()
+
+
+async def test_two_concurrent_runs_one_audit_log_render_each_decision_once(global_otel):
+    """Run A carries an `AuditLog`, run B carries none. The mirror is process-wide, so BOTH budget
+    events ride the chain (an `AuditLog` auto-populates from the whole process bus) — and core's
+    Option C spans stand down for both, so no decision is rendered twice."""
+    import asyncio
+
+    from cendor.acttrace import AuditLog
+
+    audit = AuditLog("support")
+    try:
+        await asyncio.gather(
+            _budgeted(_slow_agent("gpt-4o-mini", "a", 0.03), audit),
+            _budgeted(_slow_agent("gpt-4.1-mini", "b", 0.01), None),
+        )
+    finally:
+        audit.detach()
+    names = [s.name for s in global_otel.get_finished_spans()]
+    assert names.count("agent.run") == 2
+    assert names.count("audit.budget_event") == 2, "both decisions on the wire, via the mirror"
+    assert [n for n in names if n.startswith("governance.")] == [], "ops spans stood down"
+
+
+async def test_two_concurrent_runs_with_no_audit_log_get_option_c_once_each(global_otel):
+    """No `AuditLog` anywhere: each run's decision is rendered by Option C, exactly once."""
+    import asyncio
+
+    await asyncio.gather(
+        _budgeted(_slow_agent("gpt-4o-mini", "a", 0.03), None),
+        _budgeted(_slow_agent("gpt-4.1-mini", "b", 0.01), None),
+    )
+    names = [s.name for s in global_otel.get_finished_spans()]
+    assert names.count("agent.run") == 2
+    assert names.count("governance.budget_event") == 2
+    assert [n for n in names if n.startswith("audit.")] == []

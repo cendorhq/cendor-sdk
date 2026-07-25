@@ -24,6 +24,13 @@ interleaved.
   run's step 1, putting a foreign call's cost inside the run). Falls back to the ambient
   `trace()` scope first, exactly like the domain-span path.
 
+### Added (tests only)
+- Governance precedence pinned **under concurrency** — the wave only probed it sequentially. Two
+  overlapping runs with one `AuditLog` between them: both decisions ride the chain as
+  `audit.budget_event` (an `AuditLog` auto-populates from the whole process bus) and core's Option C
+  spans stand down for both; with no `AuditLog`, each run gets exactly one `governance.budget_event`.
+  Never twice, never zero.
+
 ### Unchanged
 - The public API, the run ids, the spans and their attributes. Python's latch was never affected by
   the Node-LTS `enterWith` defect, and the streaming paths were already context-scoped
