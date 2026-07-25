@@ -290,7 +290,10 @@ def _check_telemetry(root: Path, detected: Detected, src: _Src, out: list[Findin
             installed = detected.installed_pypi.get(pkg)
             if not installed:
                 continue
-            if compare_versions(clean_version(installed), floor) < 0:
+            have = clean_version(installed)
+            if have is None:  # an unparseable version is not evidence of anything
+                continue
+            if compare_versions(have, floor) < 0:
                 out.append(
                     Finding(
                         "warn",
