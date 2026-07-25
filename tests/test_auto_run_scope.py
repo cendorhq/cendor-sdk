@@ -194,3 +194,141 @@ async def test_the_async_stream_path_auto_scopes_exactly_once(global_otel, build
     names = [s.name for s in global_otel.get_finished_spans()]
     assert names.count("agent.run") == 1
     assert names.count("chat gpt-4o") == 1
+
+
+# ------------------------------------------------------------------- GLR-3: no cross-run adoption
+# These use clients with REAL latency so the runs genuinely overlap. With an instant stub each run
+# finishes before the next starts and the bus never interleaves — which is why the defect below
+# survived the wave: every acceptance probe was sequential.
+
+
+class _SlowOpenAI:
+    """An openai-shaped async client whose completion takes ``delay`` seconds."""
+
+    def __init__(self, content: str, delay: float, model: str) -> None:
+        self._content, self._delay, self._model = content, delay, model
+        self.chat = self
+        self.completions = self
+
+    async def create(self, **kwargs: object) -> object:
+        import asyncio
+        from types import SimpleNamespace
+
+        await asyncio.sleep(self._delay)
+        return SimpleNamespace(
+            id="c1",
+            model=self._model,
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=self._content, tool_calls=None),
+                    finish_reason="stop",
+                )
+            ],
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+        )
+
+
+def _slow_agent(model: str, content: str, delay: float) -> Agent:
+    return Agent(
+        name="assistant", model=model, client=_SlowOpenAI(content, delay, model), provider="openai"
+    )
+
+
+async def test_two_overlapping_runs_never_adopt_each_others_calls(global_otel):
+    """Both roots used to learn whichever run emitted first: one call rendered twice (once under
+    each root), the other lost, and both roots stamped with one ``cendor.run.id``."""
+    import asyncio
+
+    await asyncio.gather(
+        run.aio(_slow_agent("gpt-4o-mini", "a", 0.05), "hi"),
+        run.aio(_slow_agent("gpt-4.1-mini", "b", 0.01), "hi"),
+    )
+    spans = global_otel.get_finished_spans()
+    roots = [s for s in spans if s.name == "agent.run"]
+    assert len(roots) == 2
+    by_run_id = {str(s.attributes.get("cendor.run.id") or ""): s.context.span_id for s in roots}
+    assert len(by_run_id) == 2 and all(by_run_id), "each root learned its OWN run id"
+    chats = [s for s in spans if s.name.startswith("chat ")]
+    assert sorted(s.name for s in chats) == ["chat gpt-4.1-mini", "chat gpt-4o-mini"]
+    for c in chats:  # every call sits under the root of the run that made it
+        assert c.parent is not None
+        assert c.parent.span_id == by_run_id[str(c.attributes["cendor.trace_id"])]
+
+
+def test_a_stream_in_flight_does_not_silence_a_concurrent_run(global_otel, build):
+    """The stream's scope lives in the producer's copied context, so the consumer's context stays
+    clean and a concurrent run still opens its own scope."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from cendor.core import otel as _co
+
+    agent = Agent(name="assistant", model="gpt-4o")
+    with respx.mock:
+        _one_call(build)
+        stream = run.stream(agent, "hi")
+        next(iter(stream))  # the stream's scope is open
+        assert _co.live_spans_active() is False, "the latch must not leak into the consumer"
+
+        def _instant(**kwargs: object) -> object:
+            return SimpleNamespace(
+                id="c1",
+                model="gpt-4.1-mini",
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="b", tool_calls=None), finish_reason="stop"
+                    )
+                ],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15),
+            )
+
+        other = Agent(
+            name="b",
+            model="gpt-4.1-mini",
+            client=SimpleNamespace(
+                chat=SimpleNamespace(completions=SimpleNamespace(create=_instant))
+            ),
+            provider="openai",
+        )
+        run(other, "hi")
+        for _ev in stream:
+            pass
+    assert asyncio  # (import kept meaningful for the async sibling above)
+    spans = global_otel.get_finished_spans()
+    assert [s.name for s in spans].count("agent.run") == 2
+    assert sorted(s.name for s in spans if s.name.startswith("chat ")) == [
+        "chat gpt-4.1-mini",
+        "chat gpt-4o",
+    ]
+
+
+def test_a_run_less_libs_call_is_not_adopted_into_a_run(global_otel):
+    """A call with no run id belongs to no run: core's flat emitter renders it, the run scope must
+    not (it used to become the run's step 1, putting a foreign call's cost inside the run)."""
+    import asyncio
+
+    from cendor.core import bus
+    from cendor.core.types import LLMCall, Usage
+
+    async def main():
+        async def _foreign():
+            await asyncio.sleep(0.005)
+            bus.emit(
+                LLMCall(
+                    id="x1",
+                    provider="openai",
+                    model="libs-only-model",
+                    messages=[],
+                    usage=Usage(10, 5),
+                )
+            )
+
+        await asyncio.gather(run.aio(_slow_agent("gpt-4o-mini", "a", 0.025), "hi"), _foreign())
+
+    asyncio.run(main())
+    spans = global_otel.get_finished_spans()
+    root = next(s for s in spans if s.name == "agent.run")
+    children = [
+        s for s in spans if s.parent is not None and s.parent.span_id == root.context.span_id
+    ]
+    assert [c.name for c in children] == ["chat gpt-4o-mini"]

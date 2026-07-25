@@ -1423,7 +1423,10 @@ def _auto_run_scope(session: Session | None) -> Iterator[None]:
     from .otel import live_spans
 
     cid = getattr(session, "id", None) if session is not None else None
-    with live_spans(conversation_id=cid):
+    # `_own_context_only`: the automatic scope is context-bound by construction, so it learns its
+    # run family only from an event emitted inside its own context — never from a concurrent run's
+    # first event (which used to make two overlapping runs share one id and lose one of the two).
+    with live_spans(conversation_id=cid, _own_context_only=True):
         yield
 
 

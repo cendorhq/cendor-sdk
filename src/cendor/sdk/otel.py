@@ -9,12 +9,47 @@ returning ``False``** if OpenTelemetry isn't installed (local-first — telemetr
 
 from __future__ import annotations
 
+import threading
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 from cendor.core.types import LLMCall, ToolCall
 
 from .result import Result, Step
+
+# ------------------------------------------------------------------- run-family claims (GLR-3 fix)
+# A scope learns which run it belongs to from the first event it observes — but ``bus.emit`` is a
+# process-wide fanout, so once ``run()`` opens a scope automatically the first event a scope
+# sees can belong to a *different, concurrent* run. Measured before this registry existed: two
+# overlapping zero-code runs rendered one run's call twice (once under each root), dropped the
+# other's entirely, and stamped both roots with the same ``cendor.run.id``. Two rules fix it: a
+# family has exactly one owner, and the **automatic** scope only learns from an event emitted
+# inside its own context.
+_claimed_families: dict[str, object] = {}
+_claims_lock = threading.Lock()
+#: Tokens of the automatic scopes open in *this* context (a run body, or a stream's copied context).
+_open_auto_scopes: ContextVar[tuple[object, ...]] = ContextVar(
+    "cendor_open_auto_scopes", default=()
+)
+
+
+def _family_of(trace_id: str) -> str:
+    """The run family of a trace id (orchestration segments are ``{parent}:{agent}#{seg}``)."""
+    return trace_id.split(":", 1)[0]
+
+
+def _claim_family(family: str, token: object) -> bool:
+    """Claim ``family`` for ``token``. False when another open scope already owns it."""
+    with _claims_lock:
+        held = _claimed_families.setdefault(family, token)
+    return held is token
+
+
+def _release_family(family: str, token: object) -> None:
+    with _claims_lock:
+        if family and _claimed_families.get(family) is token:
+            del _claimed_families[family]
 
 
 def _system_from_call(call: Any) -> Any:
@@ -348,6 +383,7 @@ def live_spans(
     name: str = "agent.run",
     conversation_id: str | None = None,
     label: str | None = None,
+    _own_context_only: bool = False,
 ) -> Any:
     """Emit ``gen_ai`` spans **live** as a run progresses — the streaming counterpart to
     :func:`span_tree` (which builds the tree post-hoc from a finished ``Result``). Wrap a run:
@@ -406,6 +442,10 @@ def live_spans(
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
     _co.enter_live_spans()  # G20: the core bus→span emitter stands down while we own the spans
+    token = object()  # this scope's identity: claims a run family, marks its own context
+    ctx_token = (
+        _open_auto_scopes.set((*_open_auto_scopes.get(), token)) if _own_context_only else None
+    )
     with tracer.start_as_current_span(name) as root:
         root.set_attribute("gen_ai.operation.name", "agent")
         if conversation_id:
@@ -427,10 +467,21 @@ def live_spans(
             """Learn the run-family root from the first event; reject foreign runs (GLR-3). The
             family is the segment before the first ``:`` (orchestration segments are
             ``{parent}:{agent}#{seg}``; a single-agent run is the bare run id) — matches the
-            collector's match + the monitor's key. Returns ``False`` if the event is foreign."""
+            collector's match + the monitor's key. Returns ``False`` if the event is foreign.
+
+            ``bus.emit`` is a process-wide fanout, so the first event a scope sees may belong to a
+            *different, concurrent* run: learning it anyway made two overlapping zero-code runs
+            render one run twice, lose the other, and stamp both roots with one run id. So the
+            **automatic** scope learns only from its own context; a family has exactly one owner."""
             nonlocal family, run_id_set
-            if not run_id_set and trace_id:
-                family = trace_id.split(":", 1)[0]
+            if not trace_id:
+                return False  # not attributable to any run — core's flat emitter renders it
+            if not run_id_set:
+                if _own_context_only and token not in _open_auto_scopes.get():
+                    return False  # emitted outside this scope — it belongs to another run
+                if not _claim_family(_family_of(trace_id), token):
+                    return False  # another open scope already owns this run
+                family = _family_of(trace_id)
                 root.set_attribute("cendor.run.id", family)
                 root.set_attribute("cendor.trace_id", family)
                 run_id_set = True
@@ -464,7 +515,9 @@ def live_spans(
                 return
             if not isinstance(ev, (LLMCall, ToolCall)):
                 return
-            trace_id = getattr(ev, "trace_id", "") or ""
+            # The stamped trace id, else the ambient run scope (the same fallback ``_domain_span``
+            # uses — ``bus.emit`` is a synchronous fanout, so the emitting call's scope is active).
+            trace_id = getattr(ev, "trace_id", "") or current_trace_id() or ""
             if not _learn_and_filter(trace_id):
                 return
             if not conv_set:
@@ -534,6 +587,9 @@ def live_spans(
             yield
         finally:
             bus.unsubscribe(on_event)
+            _release_family(family, token)  # the run is over — the family is free to claim again
+            if ctx_token is not None:
+                _open_auto_scopes.reset(ctx_token)
             _co.exit_live_spans()
             # Usage/cost rollups on the root at close — parity with span_tree's finished totals.
             root.set_attribute("gen_ai.usage.input_tokens", total_input)

@@ -4,6 +4,32 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] — 2026-07-26
+**Two concurrent runs no longer cross-contaminate the automatic scope.** Found by review after the
+zero-telemetry-code wave and reproduced with a client that has real latency — every acceptance probe
+had been sequential, and an instant stub finishes one run before the next starts, so the bus never
+interleaved.
+
+### Fixed
+- **Cross-run adoption.** A `live_spans` scope learned its run family from the first bus event it saw,
+  and `bus.emit` is a process-wide fanout — so two *overlapping* runs rendered one run's call twice
+  (once under each root), dropped the other run's call entirely, and stamped **both** roots with the
+  same `cendor.run.id`. In a backend that sums `gen_ai.usage.cost` over spans that is double-counted
+  spend plus a lost run. A run family now has exactly one owning scope, and the **automatic** scope
+  learns only from an event emitted inside its own context (a user's explicit
+  `with live_spans(...)` keeps the historical "first event wins" — it may legitimately wrap work that
+  runs on another thread, where no context reaches).
+- **A run-less call is no longer adopted into a run.** An `LLMCall`/`ToolCall` carrying no run id
+  belongs to no run: core's flat emitter renders it, the run scope must not (it used to become the
+  run's step 1, putting a foreign call's cost inside the run). Falls back to the ambient
+  `trace()` scope first, exactly like the domain-span path.
+
+### Unchanged
+- The public API, the run ids, the spans and their attributes. Python's latch was never affected by
+  the Node-LTS `enterWith` defect, and the streaming paths were already context-scoped
+  (`_drive_sync`'s copied context / `_drive_async`'s producer task) — this release brings the TS port
+  in line with them; see `@cendor/sdk` 0.23.2.
+
 ## [1.19.0] — 2026-07-25
 **A blocked run now shows *why* — inline on the run, with no audit object** (Option C, DR-2c; see
 `cendor-core` 1.13.0).
