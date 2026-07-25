@@ -4,6 +4,28 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] — 2026-07-25
+**A blocked run now shows *why* — inline on the run, with no audit object** (Option C, DR-2c; see
+`cendor-core` 1.13.0).
+
+`live_spans` renders `cendor-tokenguard`'s budget events and `cendor-guardrails`' decisions as
+`governance.*` **children of the `agent.run` root**, using core's `cendor.gov.*` vocabulary. So an app
+that writes zero governance code still sees the budget that stopped a run and the guardrail that
+tripped, in the trace, next to the steps they governed.
+
+### Added
+- `governance.budget_event` / `governance.guardrail_decision` children on the live run tree.
+
+### Unchanged, deliberately
+- **The audit mirror wins**: with an `AuditLog` in play the chained `audit.*` spans are the rendering
+  and these stand down — never two renderings of one decision.
+- **No `audit.*` vocabulary and no `reason` string** on these spans (rule 6: a rule's reason can carry
+  input-derived text — the audit chain keeps it, the default-on span does not).
+- `CENDOR_TELEMETRY=off` disables them with everything else.
+
+### Changed
+- Floors: `cendor-core>=1.13`, `cendor-acttrace>=1.12`.
+
 ## [1.18.0] — 2026-07-25
 **A governed run is now visible with zero telemetry code** (see `cendor-core` 1.12.0 for the switch).
 

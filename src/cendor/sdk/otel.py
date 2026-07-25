@@ -320,6 +320,27 @@ def _tool_blocked_attrs(ev: Any) -> tuple[str, dict[str, Any]]:
     return name, attrs
 
 
+def _governance_attrs(ev: Any) -> tuple[str, dict[str, Any]] | None:
+    """Option C (DR-2c): an enforcement event as a ``governance.*`` child of the run root.
+
+    Core owns the vocabulary (``cendor.gov.*``) and the rule-6 posture — no ``audit.*`` names and
+    no ``reason`` strings (a guardrail's reason can carry input-derived text; see core's Option C
+    note). The SDK only re-uses it so the same decision lands **inside the run** rather than beside
+    it. Returns ``None`` when the event isn't an enforcement event, or when an audit mirror is
+    already putting governance on the wire (the mirror wins).
+    """
+    from cendor.core import otel as _co
+
+    mapper = getattr(_co, "_gov_attrs", None)
+    if mapper is None or _co.governance_mirror_active():
+        return None  # older core (no Option C), or the mirror owns the wire
+    mapped = mapper(ev)
+    if mapped is None:
+        return None
+    name, attrs = mapped
+    return name, {k: v for k, v in attrs.items() if v is not None}
+
+
 @contextmanager
 def live_spans(
     tracer: Any = None,
@@ -377,6 +398,10 @@ def live_spans(
         "CheckpointEvent": _checkpoint_attrs,
         "OrchestrationEdge": _handoff_attrs,
         "ToolGate": _tool_blocked_attrs,
+        # Option C: enforcement decisions as run children (core renders the same two events flat for
+        # a libs-only app). Duck-typed by class name, like every other row here.
+        "BudgetEvent": _governance_attrs,
+        "GuardrailDecision": _governance_attrs,
     }
 
     tracer = tracer or ot.get_tracer("cendor.sdk")
@@ -419,7 +444,10 @@ def live_spans(
             trace_id = getattr(ev, "trace_id", "") or current_trace_id() or ""
             if not _learn_and_filter(trace_id):
                 return
-            name, attrs = builder(ev)
+            mapped = builder(ev)
+            if mapped is None:
+                return  # Option C stood down (an audit mirror owns the wire) — nothing to render
+            name, attrs = mapped
             now = time.time_ns()
             span = tracer.start_span(name, context=ctx, start_time=now)
             span.set_attribute("cendor.trace_id", trace_id)
