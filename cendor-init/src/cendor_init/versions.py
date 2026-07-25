@@ -22,7 +22,7 @@ PYPI: dict[str, str] = {
     "cendor-acttrace": "1.12.0",
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
-    "cendor-sdk": "1.19.0",
+    "cendor-sdk": "1.19.1",
     "cendor-mcp": "0.1.5",
     "cendor-init": "0.2.2",
 }
