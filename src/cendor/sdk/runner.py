@@ -14,6 +14,7 @@ import inspect
 import json
 import re
 import uuid
+from collections.abc import Iterator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import is_dataclass
@@ -1396,6 +1397,51 @@ async def _drive_async(agen: Any) -> Any:
             pass
 
 
+# --------------------------------------------------------------------------- automatic run scope
+# DR-1: a run should be visible in the backend the app configured **without any telemetry code**.
+# The SDK already owns the machinery (`otel.live_spans`), so `run()` opens it itself when telemetry
+# is on, a provider is configured, and the app has not opened a scope of its own. An explicit
+# `with live_spans(...)` always wins (the depth latch would nest a second root otherwise), and
+# `CENDOR_TELEMETRY=off` disables it. Conversation id comes from `session` — the id the user chose
+# — and never a label (a label is a human-authored tag; inventing one would be identity Cendor
+# doesn't own). No OpenTelemetry installed ⇒ this is a plain no-op context manager.
+@contextmanager
+def _auto_run_scope(session: Session | None) -> Iterator[None]:
+    from cendor.core import otel as _co
+
+    try:
+        wanted = (
+            _co.telemetry_mode() != "off"
+            and not _co.live_spans_active()  # the user opened their own scope — theirs wins
+            and _co.provider_configured()
+        )
+    except Exception:  # noqa: BLE001 — telemetry must never break a run (e.g. an older core)
+        wanted = False
+    if not wanted:
+        yield
+        return
+    from .otel import live_spans
+
+    cid = getattr(session, "id", None) if session is not None else None
+    with live_spans(conversation_id=cid):
+        yield
+
+
+def _auto_scope_gen(session: Session | None, gen: Any) -> Any:
+    """Wrap a stream generator so the automatic scope opens **inside** the producer's context (the
+    one `_drive_sync` copies), keeping the latch visible to the emitting calls — otherwise core's
+    flat-span emitter would render the same calls a second time."""
+    with _auto_run_scope(session):
+        yield from gen
+
+
+async def _auto_scope_agen(session: Session | None, agen: Any) -> Any:
+    """Async counterpart of :func:`_auto_scope_gen` (the producer task's own context)."""
+    with _auto_run_scope(session):
+        async for ev in agen:
+            yield ev
+
+
 # --------------------------------------------------------------------------- run() entrypoint
 
 
@@ -1440,31 +1486,32 @@ class _Run:
         segment's list); omit it to use each agent's ``Agent(guardrails=[…])``. ``guardrail_mode``
         (``"blocking"`` / ``"parallel"``) is honoured on the async path (``run.aio``); a sync run
         always blocks."""
-        if isinstance(agent, (list, tuple)):
-            from .orchestration import run_agents
+        with _auto_run_scope(session):  # DR-1: telemetry with zero telemetry code
+            if isinstance(agent, (list, tuple)):
+                from .orchestration import run_agents
 
-            with _gr.collecting():  # run_agents builds its Result inside this scope
-                return run_agents(
-                    list(agent),
-                    input,
-                    audit=audit,
-                    max_turns=max_turns,
-                    session=session,
-                    checkpoint=checkpoint,
-                    on_step=on_step,
-                    guardrails=guardrails,
-                )
-        return Runner(
-            agent,
-            session=session,
-            audit=audit,
-            max_turns=max_turns,
-            retry=retry,
-            checkpoint=checkpoint,
-            on_step=on_step,
-            guardrails=guardrails,
-            guardrail_mode=guardrail_mode,
-        ).run(input)
+                with _gr.collecting():  # run_agents builds its Result inside this scope
+                    return run_agents(
+                        list(agent),
+                        input,
+                        audit=audit,
+                        max_turns=max_turns,
+                        session=session,
+                        checkpoint=checkpoint,
+                        on_step=on_step,
+                        guardrails=guardrails,
+                    )
+            return Runner(
+                agent,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                retry=retry,
+                checkpoint=checkpoint,
+                on_step=on_step,
+                guardrails=guardrails,
+                guardrail_mode=guardrail_mode,
+            ).run(input)
 
     async def aio(
         self,
@@ -1483,31 +1530,32 @@ class _Run:
         """Async counterpart of :meth:`__call__`; ``on_step`` fires per :class:`Step` live.
         ``guardrails`` overrides the agent's own list for this run; ``guardrail_mode``
         (``"blocking"`` / ``"parallel"``) overrides the agent's mode (single-agent runs)."""
-        if isinstance(agent, (list, tuple)):
-            from .orchestration import run_agents_async
+        with _auto_run_scope(session):  # DR-1: telemetry with zero telemetry code
+            if isinstance(agent, (list, tuple)):
+                from .orchestration import run_agents_async
 
-            with _gr.collecting():  # run_agents_async builds its Result inside this scope
-                return await run_agents_async(
-                    list(agent),
-                    input,
-                    audit=audit,
-                    max_turns=max_turns,
-                    session=session,
-                    checkpoint=checkpoint,
-                    on_step=on_step,
-                    guardrails=guardrails,
-                )
-        return await Runner(
-            agent,
-            session=session,
-            audit=audit,
-            max_turns=max_turns,
-            retry=retry,
-            checkpoint=checkpoint,
-            on_step=on_step,
-            guardrails=guardrails,
-            guardrail_mode=guardrail_mode,
-        ).run_async(input)
+                with _gr.collecting():  # run_agents_async builds its Result inside this scope
+                    return await run_agents_async(
+                        list(agent),
+                        input,
+                        audit=audit,
+                        max_turns=max_turns,
+                        session=session,
+                        checkpoint=checkpoint,
+                        on_step=on_step,
+                        guardrails=guardrails,
+                    )
+            return await Runner(
+                agent,
+                session=session,
+                audit=audit,
+                max_turns=max_turns,
+                retry=retry,
+                checkpoint=checkpoint,
+                on_step=on_step,
+                guardrails=guardrails,
+                guardrail_mode=guardrail_mode,
+            ).run_async(input)
 
     def stream(
         self,
@@ -1547,7 +1595,7 @@ class _Run:
                 max_turns=max_turns,
                 checkpoint=checkpoint,
             )
-        return _drive_sync(ctx, gen)
+        return _drive_sync(ctx, _auto_scope_gen(session, gen))
 
     def astream(
         self,
@@ -1581,7 +1629,7 @@ class _Run:
                 max_turns=max_turns,
                 checkpoint=checkpoint,
             )
-        return _drive_async(agen)
+        return _drive_async(_auto_scope_agen(session, agen))
 
 
 run = _Run()

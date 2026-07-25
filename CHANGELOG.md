@@ -4,6 +4,31 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] — 2026-07-25
+**A governed run is now visible with zero telemetry code** (see `cendor-core` 1.12.0 for the switch).
+
+⚠️ **Default-behaviour change.** If your app configures an OpenTelemetry provider
+(`configure_azure_monitor()`, a plain `set_tracer_provider`, an OTLP endpoint pointed at Cendor
+Monitor…) and you upgrade, `run()` opens the run scope itself: you get the `agent.run` root with its
+steps as children, the usage/cost rollups, `gen_ai.conversation.id` from your `session`, and — because
+the root is the active span — **governance correlated to the run**. Previously this needed
+`with live_spans(...):` around every run.
+
+### Added
+- **Automatic run scope** on `run()`, `run.aio()`, `run.stream()` and `run.astream()`. It opens only
+  when `CENDOR_TELEMETRY` isn't `off`, a provider is configured, and **no explicit `live_spans()`
+  scope is open** — an explicit scope always wins, so there is never a second root. Without
+  OpenTelemetry installed nothing happens at all.
+- The conversation id comes from `session.id` (the id *you* chose); `cendor.run.label` stays empty
+  unless you pass one — a label is a human-authored tag and the SDK invents no identity.
+
+### Changed
+- Floors: `cendor-core>=1.12` (the switch), `cendor-tokenguard>=1.6` (the spend tap),
+  `cendor-acttrace>=1.11` (the mirror auto-attach). Together they are what makes a run's trajectory,
+  spend **and** governance land in your backend from a zero-telemetry-code app.
+- The scope predicate is failure-safe: any error resolving it (e.g. an older `cendor-core`) is treated
+  as "no scope" rather than raised into your run.
+
 ## [1.17.0] — 2026-07-24
 Findings-closure wave — a fix for streamed-async checkpointing and multi-agent pipeline-shape
 governance parity with the TypeScript SDK. Backwards-compatible (new keyword-only options preserve

@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.17.0"
+version = "1.18.0"
 description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
@@ -22,10 +22,10 @@ classifiers = [
 # (loose >=1.x,<2 ranges so a user who installs cendor-sdk AND a library à la carte resolves to
 # one compatible set). NEVER vendor — one cendor.* subpackage per distribution (we ship cendor.sdk).
 dependencies = [
-  "cendor-core>=1.10,<2",        # stream-observer seam + visible-thinking estimation + converse_stream/async-detect (1.10)
-  "cendor-tokenguard>=1.5,<2",   # on_exceed="break" mid-stream breaker + nested-provider clamp (1.5)
+  "cendor-core>=1.12,<2",        # the telemetry switch — telemetry_mode/provider_configured/live_spans_active (1.12)
+  "cendor-tokenguard>=1.6,<2",   # the internal OTel spend tap, beside use_sink (1.6)
   "cendor-guardrails>=1.6,<2",   # rules.intent / custom_category / presets / policy_schema / azure harm-categories (1.4); decisions counter (1.6)
-  "cendor-acttrace>=1.10,<2",     # dual-shape guard (1.5); OTelMirror + AuditLog(mirror=) (1.6); mirror completeness — budget identity/numbers, usage/severity/policy (1.7)
+  "cendor-acttrace>=1.11,<2",     # AuditLog auto-attaches OTelMirror; mirror=False opt-out (1.11)
   "cendor-contextkit>=1.0,<2",   # assemble-to-budget (context_budget history packing)
   "cendor-squeeze>=1.0,<2",      # compress() (a Compressor; contextkit discovers it at eviction)
   "cendor-cassette>=1.1,<2",     # record/replay — the SDK's test fixture format AND replay engine
