@@ -25,6 +25,17 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 
 ---
 
+
+## Your runs show up in your backend, with no telemetry code (1.19.0)
+
+Configure an OpenTelemetry provider the way you already would (or point `OTEL_EXPORTER_OTLP_ENDPOINT`
+at [Cendor Monitor](https://cendor.ai/docs/monitor)) and `run()` does the rest: an `agent.run` root with
+its steps as children, usage/cost rollups, your `session` id as `gen_ai.conversation.id`, and — because
+the root is the active span — governance correlated to the run, including `governance.*` spans for the
+budget or guardrail that stopped it. An explicit `live_spans()`/`liveSpans()` still wins;
+`CENDOR_TELEMETRY=off` turns it all off; `CENDOR_DEBUG_TELEMETRY=1` says what was detected. Cendor has
+no endpoint, exporter or key — it emits into **your** provider.
+
 ## The problem
 
 Governance is best-effort *beneath* a framework — the framework owns the loop, so budgets, audit,

@@ -61,6 +61,17 @@ client, so use the provider's standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API
 `Agent(api_key=…)` / a pre-built `client=` — nothing Cendor-specific. Full guide:
 <https://cendor.ai/docs/sdk>.
 
+## Telemetry: you write none
+
+If your app configures an OpenTelemetry provider (the way you already would) and OpenTelemetry is
+installed, Cendor **emits on its own** — `gen_ai.*` call spans, spend counters, an `agent.run` tree per
+SDK `run()`, and `governance.*` spans for budget/guardrail decisions. There is **no Cendor endpoint, no
+exporter and no key**: it emits into *your* provider, so the data goes only where you already pointed a
+pipeline. **`CENDOR_TELEMETRY=off`** turns all of it off, process-wide, with no code change;
+`CENDOR_DEBUG_TELEMETRY=1` prints one line saying whether a provider was detected. With no provider (or
+no OpenTelemetry installed) every emitter is a silent no-op — that is the local-first default, not a
+misconfiguration. Prompt/response **content stays opt-in** (`otel.capture_content()`).
+
 ## The three traps most likely to bite
 
 1. **TS `budget` is curried:** `budget(cfg)(fn)` — never `budget(cfg, fn)`. Python `budget(...)` is a

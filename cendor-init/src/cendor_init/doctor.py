@@ -246,6 +246,83 @@ def _check_price_snapshot(detected: Detected, out: list[Finding]) -> None:
         )
 
 
+# --------------------------------------------------------------------------- telemetry (the switch)
+#: Source patterns that mean "this app configures an OpenTelemetry provider itself".
+_OTEL_PROVIDER_RE = re.compile(
+    r"set_tracer_provider\s*\(|configure_azure_monitor\s*\(|OTEL_EXPORTER_OTLP_ENDPOINT"
+)
+#: The explicit attachments. Since core 1.13 / @cendor/core 0.15 they are optional — telemetry flows
+#: on its own — so *seeing* them is fine (explicit wins), but combining them with `CENDOR_TELEMETRY=off`
+#: is a contradiction worth naming.
+_OTEL_ATTACH_RE = re.compile(r"use_span_emitter\s*\(|OTelSink\s*\(|OTelMirror\s*\(|live_spans\s*\(")
+#: Floors for the automatic path (the versions that carry the switch).
+TELEMETRY_FLOORS = {"cendor-core": "1.13", "cendor-sdk": "1.19", "cendor-acttrace": "1.12"}
+
+
+def _check_telemetry(root: Path, detected: Detected, src: _Src, out: list[Finding]) -> None:
+    """Telemetry wiring, statically.
+
+    Three things can silently cost an app its telemetry: `CENDOR_TELEMETRY=off` committed next to a
+    configured provider, an OTel pipeline on a Cendor too old to emit by itself, and (historically) a
+    TypeScript `new OTelSink()` constructed above the provider. None of them raises at runtime — the
+    emitters are deliberately silent — so they belong in `doctor`.
+    """
+    texts = [t for _, t in src.py + src.node]
+    configures = any(_OTEL_PROVIDER_RE.search(t) for t in texts)
+    off_locations = [
+        rel(root, Path(path)) for path, t in src.py + src.node if "CENDOR_TELEMETRY=off" in t
+    ]
+    if configures and off_locations:
+        out.append(
+            Finding(
+                "warn",
+                "CENDOR_TELEMETRY=off next to a configured OpenTelemetry provider",
+                "This app configures an OTel provider, but `CENDOR_TELEMETRY=off` appears in the "
+                "source/config — so Cendor emits nothing: no call spans, no spend counters, no "
+                "governance spans. That is a valid choice; it is only worth flagging because nothing "
+                "warns at runtime.",
+                "Remove `CENDOR_TELEMETRY=off` (or set it to `auto`) to let telemetry flow.",
+                off_locations,
+            )
+        )
+    if configures:
+        for pkg, floor in TELEMETRY_FLOORS.items():
+            installed = detected.installed_pypi.get(pkg)
+            if not installed:
+                continue
+            if compare_versions(clean_version(installed), floor) < 0:
+                out.append(
+                    Finding(
+                        "warn",
+                        f"{pkg} {installed} predates automatic telemetry",
+                        f"This app configures an OpenTelemetry provider, but {pkg} {installed} is "
+                        f"older than {floor}, which is where Cendor started emitting on its own. "
+                        "Until you upgrade, telemetry needs the explicit attachments "
+                        "(`otel.use_span_emitter()`, `use_sink(sinks.OTelSink())`, `live_spans()`, "
+                        "`AuditLog(mirror=OTelMirror())`).",
+                        f"pip install -U {pkg}",
+                    )
+                )
+    ts_sink = [
+        rel(root, Path(path))
+        for path, t in src.node
+        if "new OTelSink(" in t and "@cendor/tokenguard" in t
+    ]
+    if ts_sink:
+        out.append(
+            Finding(
+                "info",
+                "TypeScript OTelSink constructed by hand",
+                "In `@cendor/tokenguard` < 0.7.0 a sink constructed BEFORE the app's provider bound a "
+                "no-op counter permanently (the JS metrics API has no proxy), so spend counters were "
+                "silently empty. From 0.7.0 the meter is acquired lazily and order no longer matters "
+                "— and the automatic spend tap means you usually need no sink at all.",
+                "Drop the explicit sink (telemetry flows on its own), or keep it on @cendor/tokenguard >= 0.7.0.",
+                ts_sink,
+            )
+        )
+
+
 def run_doctor(root: Path) -> DoctorResult:
     root = Path(root)
     detected = detect_project(root)
@@ -257,6 +334,7 @@ def run_doctor(root: Path) -> DoctorResult:
     _check_bare_import(root, src, findings)
     _check_instrument(count, uses, findings)
     _check_money(root, src, findings)
+    _check_telemetry(root, detected, src, findings)
 
     if detected.python:
         _check_py_providers(detected, src, findings)

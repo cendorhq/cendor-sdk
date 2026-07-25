@@ -38,6 +38,9 @@ Call shapes that are easy to get wrong:
 - Python is a PEP 420 namespace — `from cendor.tokenguard import budget`; no top-level `cendor` module.
 - Provider SDKs are optional (Python extras, TS peer deps) — install only what you call.
 - SDK provider keys: the SDK builds the client, so use the provider's standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, …) or `Agent(api_key=…)` / a pre-built `client=`. There is no Cendor key config.
+- Telemetry: **do not write any**. With OpenTelemetry installed and a provider configured in the app, Cendor emits `gen_ai.*` call spans, spend counters, an `agent.run` tree per SDK `run()`, and `governance.*` decisions on its own (core ≥ 1.13 / 0.15, sdk ≥ 1.19 / 0.22). Never add `use_span_emitter()` / `use_sink(OTelSink())` / `live_spans()` unless the user asks for explicit control — and never invent an endpoint, key or exporter: Cendor has none, it emits into the app's own provider.
+- The off switch is the env var `CENDOR_TELEMETRY=off` (process-wide, no code change); `CENDOR_DEBUG_TELEMETRY=1` prints one line saying whether a provider was detected. With no provider (or no OTel installed) everything is a silent no-op — that is correct, not a bug.
+- `AuditLog(system=…)` is the *governance* line; its OTel mirror auto-attaches (pass `mirror=False` to opt out). The mirror is an **operational copy** — `verify()` runs on the hash-chained file. The automatic `governance.*` spans are operational signals too, never "an audit trail".
 
 Honest limits: deterministic guardrails don't stop novel adversarial attacks; acttrace produces
 *evidence*, not a compliance guarantee. Full reference: https://cendor.ai/docs/for-ai-assistants
@@ -71,7 +74,13 @@ Traps: `instrument()` once, not per call. TS `budget` is curried — `budget(cfg
 store is in the SDK, casing differs (`SQLiteSessionStore` / `SqliteSessionStore`). TS tokenguard
 sinks: `@cendor/tokenguard/sinks`. Python is a PEP 420 namespace (`from cendor.tokenguard import
 budget`). Provider SDKs are optional (extras / peer deps). SDK provider keys: the provider's standard
-env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Deterministic guardrails
+env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Telemetry: write none — with an
+OpenTelemetry provider configured in the app, Cendor emits call spans, spend counters, an `agent.run`
+tree per `run()`, and `governance.*` decisions by itself (core ≥ 1.13/0.15, sdk ≥ 1.19/0.22); never add
+`use_span_emitter()`/`use_sink(OTelSink())`/`live_spans()` unless explicit control is asked for, and
+never invent an endpoint or key (Cendor has none). Off switch: `CENDOR_TELEMETRY=off`; diagnose with
+`CENDOR_DEBUG_TELEMETRY=1`. `AuditLog(system=…)` auto-attaches its OTel mirror (`mirror=False` opts
+out) — the mirror and the `governance.*` spans are operational copies; `verify()` runs on the file. Deterministic guardrails
 don't stop novel attacks; acttrace is evidence, not a guarantee. Full reference:
 https://cendor.ai/docs/for-ai-assistants
 """
@@ -100,7 +109,13 @@ is `Decimal`/`decimal.js`, never `float`/`number`. `Context.assemble()` is sync 
 PII/secrets are acttrace detectors, not guardrail rules. Session store is in the SDK, casing differs
 (`SQLiteSessionStore` / `SqliteSessionStore`). TS tokenguard sinks: `@cendor/tokenguard/sinks`.
 Python is a PEP 420 namespace. Provider SDKs are optional. SDK provider keys: the provider's standard
-env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Deterministic guardrails
+env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Telemetry: write none — with an
+OpenTelemetry provider configured in the app, Cendor emits call spans, spend counters, an `agent.run`
+tree per `run()`, and `governance.*` decisions by itself (core ≥ 1.13/0.15, sdk ≥ 1.19/0.22); never add
+`use_span_emitter()`/`use_sink(OTelSink())`/`live_spans()` unless explicit control is asked for, and
+never invent an endpoint or key (Cendor has none). Off switch: `CENDOR_TELEMETRY=off`; diagnose with
+`CENDOR_DEBUG_TELEMETRY=1`. `AuditLog(system=…)` auto-attaches its OTel mirror (`mirror=False` opts
+out) — the mirror and the `governance.*` spans are operational copies; `verify()` runs on the file. Deterministic guardrails
 don't stop novel attacks; acttrace is evidence, not a guarantee. Full reference:
 https://cendor.ai/docs/for-ai-assistants
 """
@@ -129,7 +144,13 @@ is `Decimal`/`decimal.js`, never `float`/`number`. `Context.assemble()` is sync 
 PII/secrets are acttrace detectors, not guardrail rules. Session store is in the SDK, casing differs
 (`SQLiteSessionStore` / `SqliteSessionStore`). TS tokenguard sinks: `@cendor/tokenguard/sinks`.
 Python is a PEP 420 namespace. Provider SDKs are optional. SDK provider keys: the provider's standard
-env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Deterministic guardrails
+env var (`OPENAI_API_KEY`) or `Agent(api_key=…)`, never a Cendor key config. Telemetry: write none — with an
+OpenTelemetry provider configured in the app, Cendor emits call spans, spend counters, an `agent.run`
+tree per `run()`, and `governance.*` decisions by itself (core ≥ 1.13/0.15, sdk ≥ 1.19/0.22); never add
+`use_span_emitter()`/`use_sink(OTelSink())`/`live_spans()` unless explicit control is asked for, and
+never invent an endpoint or key (Cendor has none). Off switch: `CENDOR_TELEMETRY=off`; diagnose with
+`CENDOR_DEBUG_TELEMETRY=1`. `AuditLog(system=…)` auto-attaches its OTel mirror (`mirror=False` opts
+out) — the mirror and the `governance.*` spans are operational copies; `verify()` runs on the file. Deterministic guardrails
 don't stop novel attacks; acttrace is evidence, not a guarantee. Full reference:
 https://cendor.ai/docs/for-ai-assistants
 """

@@ -154,3 +154,48 @@ def test_price_snapshot_fresh_is_silent(tmp_path: Path, monkeypatch):
     out: list[Finding] = []
     _check_price_snapshot(detected, out)
     assert out == []
+
+
+# --------------------------------------------------------------------------- telemetry (the switch)
+# Since cendor-core 1.13 telemetry flows on its own, so the failure modes moved: not "you forgot to
+# attach", but "you turned it off next to a configured provider" or "your Cendor is too old to emit".
+# Neither warns at runtime (the emitters are deliberately silent), so doctor is where they surface.
+
+
+def test_off_switch_next_to_a_configured_provider_is_flagged(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = ["cendor-core"]\n', encoding="utf-8"
+    )
+    (tmp_path / "app.py").write_text(
+        "from opentelemetry import trace\n"
+        "trace.set_tracer_provider(provider)\n"
+        "# deployment note: CENDOR_TELEMETRY=off\n",
+        encoding="utf-8",
+    )
+    result = run_doctor(tmp_path)
+    titles = [f.title for f in result.findings]
+    assert any("CENDOR_TELEMETRY=off" in t for t in titles)
+    assert result.exit_code == 0, "a deliberate opt-out is a warning, never a CI failure"
+
+
+def test_no_provider_means_no_telemetry_finding(tmp_path):
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "app"\ndependencies = ["cendor-core"]\n', encoding="utf-8"
+    )
+    (tmp_path / "app.py").write_text(
+        "from cendor.core import instrument\nclient = instrument(OpenAI())\n", encoding="utf-8"
+    )
+    result = run_doctor(tmp_path)
+    assert not any("CENDOR_TELEMETRY" in f.title for f in result.findings)
+
+
+def test_a_handwritten_ts_otelsink_gets_the_ordering_note(tmp_path):
+    (tmp_path / "package.json").write_text(
+        '{"name":"app","dependencies":{"@cendor/sdk":"^0.22.0"}}', encoding="utf-8"
+    )
+    (tmp_path / "app.ts").write_text(
+        "import { OTelSink } from '@cendor/tokenguard/sinks';\nuseSink(new OTelSink());\n",
+        encoding="utf-8",
+    )
+    result = run_doctor(tmp_path)
+    assert any("OTelSink" in f.title for f in result.findings)
