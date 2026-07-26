@@ -14,7 +14,7 @@ AS_OF = "2026-07-26"
 
 PYPI: dict[str, str] = {
     "cendor-core": "1.14.0",
-    "cendor-tokenguard": "1.6.0",
+    "cendor-tokenguard": "1.6.1",
     "cendor-guardrails": "1.6.0",
     "cendor-contextkit": "1.0.3",
     "cendor-squeeze": "1.1.1",
