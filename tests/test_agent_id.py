@@ -2,14 +2,14 @@
 
 Measured 2026-07-26 (`plan/REPORT-MONITOR-DOORS-FITGAP-2026-07-26.md`):
 
-* `gen_ai.agent.id` was **never emitted and never stored** — an agent was a string-only label, so two
-  agents sharing a name across apps collided and a rename lost the history.
+* `gen_ai.agent.id` was **never emitted and never stored** — an agent was a string-only label, so
+  two agents sharing a name across apps collided and a rename lost the history.
 * `governance_events.agent` was populated on **13 of 386** rows, i.e. "which agent was blocked" was
   answerable only by inferring it from step ordering. On a governance product that is the attribute
   most worth having.
 
-Rails: the id is emitted **only when the app gave one** — never hashed, never a placeholder (D3), and
-core still carries no identity of its own. No network: a fake provider client.
+Rails: the id is emitted **only when the app gave one** — never hashed, never a placeholder (D3),
+and core still carries no identity of its own. No network: a fake provider client.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+
 from cendor.sdk import Agent, run
 from cendor.sdk.otel import live_spans, span_tree
 
@@ -115,7 +116,7 @@ def test_span_tree_carries_the_id_post_hoc(otel_traces):
 
 
 def test_the_id_does_not_shift_positional_arguments():
-    """`Agent("support", "gpt-4o", "You are…")` is a documented shape — `id` is appended, not inserted."""
+    """`Agent("support", "gpt-4o", "You are…")` is documented — `id` is appended, not inserted."""
     a = Agent("support", "gpt-4o", "You are helpful.")
     assert a.name == "support"
     assert a.model == "gpt-4o"
@@ -161,7 +162,8 @@ def test_audit_mirror_spans_name_the_acting_agent(otel_traces):
     audit = _attrs(otel_traces, "audit.")
     assert audit, "no audit mirror spans"
     named = [a for a in audit if a.get("cendor.audit.agent") == "refund-bot"]
-    assert named, f"no mirrored entry named the agent: {[a.get('cendor.audit.type') for a in audit]}"
+    types = [a.get("cendor.audit.type") for a in audit]
+    assert named, f"no mirrored entry named the agent: {types}"
     assert any(a.get("cendor.audit.agent_id") == "agent-7" for a in audit)
     # An llm_call entry has no agent field in its payload at all — it is exactly the case the
     # measured 13/386 was missing.
