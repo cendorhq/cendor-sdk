@@ -26,6 +26,18 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 ---
 
 
+## An agent can have an identity, not just a name (1.20.0)
+
+```python
+agent = Agent(name="support", model="gpt-4o", id="reg-42")   # id -> gen_ai.agent.id
+```
+
+A name is a label: two agents in two apps can share one, and renaming an agent loses its history. Pass
+`id=` and it rides the semconv `gen_ai.agent.id` on every span of that agent's turns — and on its
+governance rows, which is how a budget block finally says **which** agent it stopped (measured before
+1.20.0: 13 of 386 governance rows named their agent). Give no id and the attribute is simply **omitted**
+— never a hash of the name, never a placeholder. Needs `cendor-core >= 1.14` / `cendor-acttrace >= 1.13`.
+
 ## Your runs show up in your backend, with no telemetry code (1.19.1)
 
 Configure an OpenTelemetry provider the way you already would (or point `OTEL_EXPORTER_OTLP_ENDPOINT`

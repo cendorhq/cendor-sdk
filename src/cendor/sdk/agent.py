@@ -38,6 +38,11 @@ class Agent:
 
     Args:
         name: A short identifier used in results, audit decisions, and handoffs.
+        id: Optional **stable identity** for this agent, emitted as ``gen_ai.agent.id``. A name is
+            a label — two apps can share one, and renaming one loses its history — so pass an id
+            when you have one (your own registry key, or the id a framework already owns: Foundry's
+            ``agent_id``, Bedrock's ``agentId``, an OpenAI ``assistant_id``). When it is absent the
+            attribute is simply **omitted**: Cendor never hashes or invents identity.
         model: Any core-supported model id (``"gpt-4o"``, ``"claude-opus-4-8"``, ``"gemini-…"``).
         instructions: The system prompt.
         tools: ``@tool``-decorated callables, plain functions, or ``Tool`` objects.
@@ -111,6 +116,10 @@ class Agent:
     reask_on_output_trip: int = 0  # re-ask N times on an output block (0=off, non-streaming)
     stream_check_window: int = 0  # run.stream: check output every N chars (0=off, final-text only)
     max_usd: float | None = None  # per-agent spend cap (enforced by the orchestrator)
+    # Appended at the END of the field list on purpose: inserting it near `name` would shift every
+    # positional argument after it, and `Agent("support", "gpt-4o", "You are…")` is a documented
+    # shape.
+    id: str | None = None  # optional stable identity → gen_ai.agent.id (never invented)
     api_key: str | None = field(default=None, repr=False)  # never surface a key in repr()
     base_url: str | None = None
     client: Any = None

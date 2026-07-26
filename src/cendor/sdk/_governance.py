@@ -25,10 +25,22 @@ if TYPE_CHECKING:
 #: order (the event is emitted synchronously inside the active agent's scope). Empty when no run.
 _active_agent: ContextVar[str] = ContextVar("cendor_sdk_active_agent", default="")
 
+#: The **id** of that agent, when the app gave it one (``Agent(id=…)``) — the semconv sibling of
+#: ``gen_ai.agent.name``. Empty when unknown, and **never invented**: a name is a label (two apps
+#: can share one, and a rename loses history) while an id is identity, and Cendor has no business
+#: manufacturing identity it was not given. Frameworks that own a real id (Foundry's ``agent_id``,
+#: Bedrock's ``agentId``, an OpenAI ``assistant_id``) supply it through their adapter.
+_active_agent_id: ContextVar[str] = ContextVar("cendor_sdk_active_agent_id", default="")
+
 
 def current_agent() -> str:
     """The name of the agent currently executing a turn, or ``""`` outside a run."""
     return _active_agent.get()
+
+
+def current_agent_id() -> str:
+    """The id of the agent currently executing a turn, or ``""`` when unknown / outside a run."""
+    return _active_agent_id.get()
 
 
 #: The conversation id of the run in flight (set by the runner from the session key, G19). Read by
@@ -52,6 +64,9 @@ def _sdk_ambient(_event: Any) -> dict[str, Any] | None:
     agent = _active_agent.get()
     if agent:
         out["agent"] = agent
+    agent_id = _active_agent_id.get()
+    if agent_id:
+        out["agent_id"] = agent_id
     conversation = _active_conversation.get()
     if conversation:
         out["conversation_id"] = conversation
@@ -95,6 +110,11 @@ def _scope(agent: Agent) -> Any:
         stack.enter_context(track(agent=agent.name))
         token = _active_agent.set(agent.name)
         stack.callback(_active_agent.reset, token)
+        # Only when the app gave the agent an id. Absent ⇒ the attribute is omitted downstream, not
+        # hashed and not placeholdered (§6.1 / D3): Cendor invents no identity.
+        if getattr(agent, "id", None):
+            id_token = _active_agent_id.set(str(agent.id))
+            stack.callback(_active_agent_id.reset, id_token)
         if agent.max_usd is not None:
             # Name the per-agent ceiling so a block by an agent's max_usd is identifiable in a
             # monitor (which budget blocked what) — the tokenguard 1.3 budget(name=) hook (G10).

@@ -105,6 +105,17 @@ def _group_by_agent(steps: list[Step]) -> list[tuple[str, list[Step]]]:
     return groups
 
 
+def _agent_id_of(steps: list[Step]) -> str:
+    """The agent id recorded on a group's calls, or ``""``. Post-hoc, the ``Result`` is all there is
+        —
+    the id rode in on ``metadata["agent_id"]`` (stamped by the ambient provider at construction)."""
+    for step in steps:
+        aid = (getattr(step.call, "metadata", None) or {}).get("agent_id")
+        if isinstance(aid, str) and aid:
+            return aid
+    return ""
+
+
 def span_tree(
     result: Result,
     tracer: Any = None,
@@ -158,6 +169,13 @@ def span_tree(
             with tracer.start_as_current_span(f"agent {agent_name}") as agent_span:
                 agent_span.set_attribute("gen_ai.operation.name", "invoke_agent")
                 agent_span.set_attribute("gen_ai.agent.name", agent_name)
+                # W4: the agent's stable id, if the app gave it one. Read from the recorded call's
+                # metadata (the ambient provider stamped it at construction) — post-hoc, the Result
+                # is
+                # all we have, and it is enough. Omitted when unknown; never invented.
+                agent_id = _agent_id_of(group)
+                if agent_id:
+                    agent_span.set_attribute("gen_ai.agent.id", agent_id)
                 for step in group:
                     step_no += 1
                     if step.kind == "llm" and isinstance(step.call, LLMCall):
@@ -166,6 +184,8 @@ def span_tree(
                             s.set_attribute("gen_ai.system", step.call.provider)
                             s.set_attribute("gen_ai.request.model", step.call.model)
                             s.set_attribute("gen_ai.agent.name", agent_name)
+                            if agent_id:
+                                s.set_attribute("gen_ai.agent.id", agent_id)
                             s.set_attribute("cendor.step", step_no)
                             _set_call_attrs(s, step.call)
                             if step.usage is not None:
@@ -190,6 +210,8 @@ def span_tree(
                             s.set_attribute("gen_ai.operation.name", "execute_tool")
                             s.set_attribute("gen_ai.tool.name", step.name)
                             s.set_attribute("gen_ai.agent.name", agent_name)
+                            if agent_id:
+                                s.set_attribute("gen_ai.agent.id", agent_id)
                             s.set_attribute("cendor.step", step_no)
                             _set_tool_attrs(s, step.call)
                             for k, v in _tool_source_attrs(step.name).items():  # E-wave source
@@ -424,7 +446,7 @@ def live_spans(
     from cendor.core import bus, current_trace_id
     from cendor.core import otel as _co
 
-    from ._governance import current_agent, current_conversation
+    from ._governance import current_agent, current_agent_id, current_conversation
 
     # E-wave: bus event class → attrs builder (RAG rides library events; the rest are SDK events).
     _DOMAIN_BUILDERS = {
@@ -533,6 +555,11 @@ def live_spans(
             # Agent: the ambient current agent (in scope), falling back to the event's stamped
             # metadata (GLR-2 — correct even for an out-of-scope streamed delivery).
             agent = current_agent() or (getattr(ev, "metadata", None) or {}).get("agent") or ""
+            # W4/S4: the agent's stable id, when the app gave it one. Emitted ONLY when known —
+            # never hashed, never placeholdered (D3). A name is a label; an id is identity.
+            agent_id = (
+                current_agent_id() or (getattr(ev, "metadata", None) or {}).get("agent_id") or ""
+            )
             if agent:
                 agents_seen.setdefault(agent, None)  # G-V4-2: collect participants for the root
             end = time.time_ns()
@@ -549,6 +576,8 @@ def live_spans(
                 span.set_attribute("cendor.step", step_no)
                 if agent:
                     span.set_attribute("gen_ai.agent.name", agent)
+                if agent_id:
+                    span.set_attribute("gen_ai.agent.id", agent_id)
                 _set_call_attrs(span, ev)
                 if ev.usage is not None:
                     span.set_attribute("gen_ai.usage.input_tokens", ev.usage.input_tokens)
@@ -574,6 +603,8 @@ def live_spans(
                 span.set_attribute("cendor.step", step_no)
                 if agent:
                     span.set_attribute("gen_ai.agent.name", agent)
+                if agent_id:
+                    span.set_attribute("gen_ai.agent.id", agent_id)
                 _set_tool_attrs(span, ev)
                 for k, v in _tool_source_attrs(ev.name).items():  # E-wave: local vs mcp + server
                     span.set_attribute(k, v)

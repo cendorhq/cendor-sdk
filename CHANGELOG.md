@@ -4,6 +4,35 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] — 2026-07-26
+**An agent can have an identity, not just a name — and every governance row says which agent it was.**
+
+### `Agent(id=…)`
+
+A name is a label: two agents in two apps can share one, and renaming an agent loses its history. Pass
+`id=` and it is emitted as `gen_ai.agent.id` on every span of that agent's turns — the live tree, the
+post-hoc `span_tree`, and the governance rows. Use your own registry key, or the id a framework already
+owns (Azure AI Foundry's `agent_id`, Bedrock's `agentId`, an OpenAI `assistant_id`).
+
+**When you give no id the attribute is simply omitted** — never a hash of the name, never a
+placeholder. Cendor does not invent identity.
+
+`id` is appended at the end of the `Agent` field list, so `Agent("support", "gpt-4o", "You are…")`
+keeps working unchanged.
+
+### The actor on every governance row (needs cendor-core 1.14 / cendor-acttrace 1.13)
+
+The SDK's ambient provider now stamps the acting agent's **id** beside its name, which is what lets a
+`governance.*` span or an `audit.*` mirror entry name the agent — including on the entry types that
+carry no agent field of their own, such as a budget block. Measured before this release: 13 of 386
+governance rows named their agent.
+
+### Also
+
+Requires `cendor-core >= 1.14` and `cendor-acttrace >= 1.13`. Note the **behaviour change** in
+`cendor-core` 1.14.0: `core.trace()` now opens a real parent span, so a libs-side `trace()` scope
+groups its calls into one trace. It opens no span inside an SDK run — your run already owns its trace.
+
 ## [1.19.1] — 2026-07-26
 **Two concurrent runs no longer cross-contaminate the automatic scope.** Found by review after the
 zero-telemetry-code wave and reproduced with a client that has real latency — every acceptance probe
