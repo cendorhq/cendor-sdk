@@ -27,9 +27,9 @@ PYPI: dict[str, str] = {
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
     "cendor-sdk": "1.20.0",
-    "cendor-mcp": "0.1.5",
-    "cendor-init": "0.2.2",
+    "cendor-mcp": "0.1.6",
+    "cendor-init": "0.3.0",
 }
 
 #: The optional self-hosted observability container (not a PyPI package).
-MONITOR_IMAGE_TAG = "0.14.2"
+MONITOR_IMAGE_TAG = "0.15.0"

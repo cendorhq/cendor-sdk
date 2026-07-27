@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+## 0.3.0 — 2026-07-27
+
+- **`doctor --online`** — opt-in. Compares your installed/pinned versions against the live feed at
+  `https://cendor.ai/releases.json` instead of the snapshot compiled into this CLI. The snapshot is a
+  lagging oracle by construction (only as fresh as the CLI), and `uvx cendor-init` keeps the
+  documented path current — but a **pinned** init in CI, which is exactly where "you are behind"
+  matters, can be arbitrarily stale.
+  **Without the flag there is no network call at all**, and that is now asserted by a test rather than
+  assumed. An unreachable feed degrades to the bundled snapshot with an `info` finding and does not
+  change the exit code — being offline is not a wiring problem.
+- **Lockfile detection** — `doctor` now reads `uv.lock` / `poetry.lock` / `pdm.lock` and names the
+  **lock** when the lock is what is holding Cendor back. A declared range can be perfectly wide
+  (`cendor-core>=1.0,<2.0`) while the lock beside it pins something years old, and the build stays
+  green the whole time — the range, which is what a reader checks, is not the constraint.
+  Honest limit: it reads the lock as text. It reports what is pinned; it does not resolve.
+- Offline versions snapshot refreshed to the 2026-07-27 shelf (`cendor-core` 1.14.2 /
+  `@cendor/core` 0.16.2, `cendor-cassette` 1.1.1, `cendor-guardrails` 1.6.1). The snapshot and its
+  TypeScript twin are now **generated** from `cendor-site/src/data/versions.json` — five hand-synced
+  files became one edited and four generated, after they drifted on 2026-07-26.
+
 - Offline versions snapshot refreshed to the 2026-07-24 shelf (`cendor-sdk` 1.17.0 / `@cendor/sdk`
   0.21.1; `/releases` remains the source of truth).
 - **Snapshot-bump policy:** the JS `doctor` clean-bill test fixture now derives its `@cendor/core`
