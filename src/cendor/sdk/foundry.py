@@ -16,7 +16,25 @@ from .runner import run
 
 
 class FoundryAdapter:
-    """Adapt a ``cendor.sdk`` agent to the Bot Framework Activity protocol (custom-engine agent)."""
+    """Adapt a ``cendor.sdk`` agent to the Bot Framework Activity protocol (custom-engine agent).
+
+    Use this when **cendor should BE the endpoint** — it owns the Activity request/reply
+    shape, so you hand it inbound Activities and send back what it returns.
+
+    ⚠️ **Not the Microsoft 365 Agents SDK path.** If your process already hosts
+    ``AgentApplication`` behind ``POST /api/messages``, it owns that plumbing (plus
+    ``TurnContext``/``TurnState``, streaming and auth) *and* holds the model client — so
+    govern it with the libraries instead: ``instrument()`` plus budgets, gates and evidence,
+    attaching the ``channelData.cendor`` envelope in your own handler in ~3 lines.
+    Constructing this adapter inside such a handler gives you **two Activity layers**, and it
+    will not raise, so nothing tells you. See
+    https://cendor.ai/docs/providers#microsoft-365-agents-sdk-custom-engine-agent
+
+    Example::
+
+        adapter = FoundryAdapter(Agent(name="assistant", model="gpt-4o", instructions="Help."))
+        reply = adapter.on_activity(incoming_activity)   # -> outbound Activity, or None
+    """
 
     def __init__(self, agent: Agent, *, audit: Any = None) -> None:
         self.agent = agent

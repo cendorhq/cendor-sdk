@@ -328,3 +328,14 @@ through the same libraries, never a direct import:
 - **`require_approval` is synchronous at the tool boundary** — a long human pause holds the run
   open; for hours-long approvals, checkpoint the run and resume it
   ([hardening](hardening.md#checkpointed--resumable-runs)).
+- **`FoundryAdapter` is not the Microsoft 365 Agents SDK path.** It works by *being* the endpoint — it
+  owns the Activity request/reply shape. A **custom engine agent** built with the [Microsoft 365 Agents
+  SDK](https://learn.microsoft.com/en-us/microsoft-365/agents-sdk/) already owns that (`AgentApplication`
+  behind `POST /api/messages`, with its own `TurnContext`/`TurnState`, streaming and auth) *and* holds
+  the model client, so governing it needs no SDK API at all — `instrument()` plus budgets, gates and
+  evidence, with the `channelData.cendor` envelope attached in your own handler in about three lines.
+  Using `FoundryAdapter` there gives you two Activity layers and it will not error, so nothing tells
+  you. That integration is documented with the libraries:
+  [Providers & Integration → Microsoft 365 Agents
+  SDK](/docs/providers#microsoft-365-agents-sdk-custom-engine-agent). `run()`/`stream()` work fine
+  inside such a handler if you want the SDK's loop; nothing in that topology requires it.
