@@ -71,6 +71,7 @@ Compose the libraries beneath it: `pip install cendor-libs`.)
 ```bash
 pip install "cendor-sdk[openai,anthropic]"     # provider SDKs are optional extras
 pip install "cendor-sdk[all]"                  # every provider + interop, batteries included
+# Using uv? Same names, same extras: `uv add` instead of `pip install`.
 ```
 
 Using an AI coding assistant? `npx @cendor/init` (TS) / `uvx cendor-init` (Python) wires it up — or point it at [cendor.ai/docs/for-ai-assistants](https://cendor.ai/docs/for-ai-assistants).

@@ -108,9 +108,10 @@ def _print_finding(f: Finding) -> None:
     out("\n")
 
 
-def _cmd_doctor(_args: argparse.Namespace) -> int:
-    result = run_doctor(Path.cwd())
-    sys.stdout.write("\ncendor-init doctor\n\n")
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    online = bool(getattr(args, "online", False))
+    result = run_doctor(Path.cwd(), online=online)
+    sys.stdout.write("\ncendor-init doctor" + (" --online\n\n" if online else "\n\n"))
     for f in sorted(result.findings, key=lambda x: SEVERITY_RANK.get(x.severity, 9)):
         _print_finding(f)
     errors = sum(1 for f in result.findings if f.severity == "error")
@@ -132,7 +133,18 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_init = sub.add_parser("init", help="write assistant rules files (default command)")
     _add_init_args(p_init)
-    sub.add_parser("doctor", help="validate the wiring (never writes); exit 1 on hard problems")
+    p_doctor = sub.add_parser(
+        "doctor", help="validate the wiring (never writes); exit 1 on hard problems"
+    )
+    # OPT-IN network. Without this flag doctor makes no network call at all — Cendor never checks for
+    # updates on its own, and the default has to keep that true. With it, the "is anything behind?"
+    # check reads the live feed instead of the snapshot compiled into whichever CLI version is
+    # installed, which is the case that matters in CI where the CLI itself is pinned.
+    p_doctor.add_argument(
+        "--online",
+        action="store_true",
+        help="check versions against https://cendor.ai/releases.json instead of the bundled snapshot",
+    )
     return parser
 
 

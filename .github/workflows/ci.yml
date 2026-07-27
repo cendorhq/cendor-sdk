@@ -81,6 +81,41 @@ jobs:
         working-directory: cendor-sdk
         run: uv run python -c "import cendor.sdk; print('import cendor.sdk OK', cendor.sdk.__version__)"
 
+  # GATE G2 — floors-honest.
+  #
+  # pyproject declares a floor per library ("cendor-core>=1.14,<2"). Nothing ever asserted that the
+  # DECLARED floor actually works: normal CI resolves the newest compatible versions, so a floor that
+  # is too low is invisible here and only breaks for a user who pins conservatively. uv's
+  # `--resolution lowest-direct` installs exactly the declared floors, which turns the range from a
+  # claim into a tested one. UV_NO_SOURCES=1 is required — otherwise the dev [tool.uv.sources] table
+  # resolves the libraries from the local monorepo and the floors are never exercised at all.
+  #
+  # Measured 2026-07-27 at core 1.14.0 / acttrace 1.13.0 / tokenguard 1.6.0 / guardrails 1.6.0 /
+  # cassette 1.1.0 / contextkit 1.0.1 / squeeze 1.0.1: 287 passed. The floors are honest today; this
+  # job is what keeps them honest after the next feature lands without a floor bump.
+  floors:
+    name: G2 — suite passes at the declared dependency floors
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    env:
+      UV_NO_SOURCES: '1' # ignore the dev sources table: resolve the PUBLISHED floors from PyPI
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
+      - name: install at the LOWEST declared direct versions
+        run: |
+          uv venv .floors
+          uv pip install --python .floors --resolution lowest-direct .
+          # Test tooling is installed normally — lowering pytest itself proves nothing about our floors.
+          uv pip install --python .floors pytest pytest-asyncio hypothesis respx httpx openai anthropic \
+            opentelemetry-api opentelemetry-sdk
+      - name: show what resolved (this list IS the claim the ranges make)
+        run: uv pip list --python .floors | grep cendor
+      - name: tests at the floors
+        run: .floors/bin/python -m pytest tests -q
+
   # cendor-init is a SELF-CONTAINED, dependency-light package (stdlib only + dev tooling) living in
   # this repo but deliberately outside the uv workspace. It has no cendor-* deps, so it needs no
   # sibling checkout / PyPI decision dance — a plain `uv sync --extra dev` is enough. This job makes

@@ -175,30 +175,99 @@ def _check_py_providers(detected: Detected, src: _Src, out: list[Finding]) -> No
         )
 
 
-def _check_py_versions(detected: Detected, out: list[Finding]) -> None:
+def _check_py_versions(
+    detected: Detected,
+    out: list[Finding],
+    latest_map: dict[str, str] | None = None,
+    as_of: str | None = None,
+) -> None:
+    """Flag Cendor packages behind the latest release.
+
+    ``latest_map``/``as_of`` come from the LIVE feed when ``doctor --online`` was asked for; with no
+    arguments this reads the bundled snapshot and makes no network call at all (the default).
+    """
+    latest_of = latest_map if latest_map is not None else version_snapshot.PYPI
+    stamp = as_of or version_snapshot.AS_OF
+    live = latest_map is not None
+
     behind: list[str] = []
     for name, ver in detected.installed_pypi.items():
-        latest = version_snapshot.PYPI.get(name)
+        latest = latest_of.get(name)
         have = clean_version(ver)
         if latest and have and compare_versions(have, latest) < 0:
             behind.append(f"{name} {have} (installed) < {latest}")
     for name, spec in detected.declared_pypi.items():
         if name in detected.installed_pypi:
             continue
-        latest = version_snapshot.PYPI.get(name)
+        latest = latest_of.get(name)
         if latest and range_blocks_latest(spec, latest):
             behind.append(f'{name} "{spec}" excludes {latest}')
     if behind:
+        source = (
+            f"the live feed at {version_snapshot.RELEASES_URL} (as of {stamp})"
+            if live
+            else f"the bundled snapshot (as of {stamp}). This is an offline hint — "
+            "re-run with --online, or see /releases, for the canonical answer"
+        )
         out.append(
             Finding(
                 "warn",
                 "A Cendor package looks behind the latest release",
-                f"An installed or pinned version trails the bundled snapshot (as of {version_snapshot.AS_OF}). "
-                "Type Teach and fixes only arrive on upgrade. This is an offline hint — /releases is canonical.",
+                f"An installed or pinned version trails {source}. "
+                "Type Teach and fixes only arrive on upgrade.",
                 'pip install -U "cendor-sdk"  (check https://cendor.ai/releases)',
                 behind,
             )
         )
+
+
+#: Lockfiles that pin a resolved version regardless of how wide the declared range is.
+_LOCKFILES = ("uv.lock", "poetry.lock", "pdm.lock")
+
+_LOCK_CENDOR_RE = re.compile(
+    r'name\s*=\s*"(cendor(?:-[a-z]+)?)"\s*\n\s*version\s*=\s*"([^"]+)"', re.MULTILINE
+)
+
+
+def _check_lockfile(detected: Detected, out: list[Finding]) -> None:
+    """Name the LOCKFILE when it is what is holding a project back.
+
+    A wide declared range (``cendor-core>=1.0,<2.0``) looks perfectly healthy while the lock beside it
+    pins 1.6.0. Nothing upgrades, CI stays green, and the range — the thing a reader checks — is not
+    the constraint. This is not hypothetical: Cendor's own cookbook sat 8 minors behind on core and 12
+    on the SDK for exactly this reason, with a green build the whole time.
+
+    Reads the lock as TEXT (no toml parse, no resolver): we only need "which cendor version is pinned
+    here", and staying text-only keeps this dependency-free and offline.
+    """
+    for lock_name in _LOCKFILES:
+        lock = detected.root / lock_name
+        if not lock.exists():
+            continue
+        try:
+            text = lock.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # pragma: no cover - unreadable lock is not our problem to diagnose
+            continue
+
+        stale: list[str] = []
+        for name, pinned in _LOCK_CENDOR_RE.findall(text):
+            latest = version_snapshot.PYPI.get(name)
+            have = clean_version(pinned)
+            if latest and have and compare_versions(have, latest) < 0:
+                stale.append(f"{name} {have} (locked in {lock_name}) < {latest}")
+
+        if stale:
+            out.append(
+                Finding(
+                    "warn",
+                    f"{lock_name} pins Cendor below the latest release",
+                    "Your declared ranges may be perfectly wide — the LOCKFILE is what is holding these "
+                    "versions. Nothing will upgrade, and the build stays green, until you move the lock.",
+                    "uv lock --upgrade   (then re-run your tests)",
+                    stale,
+                )
+            )
+        return  # one lockfile per project; the first found is the one in force
 
 
 _SNAPSHOT_UPDATED_RE = re.compile(r'"_updated"\s*:\s*"(\d{4}-\d{2}-\d{2})"')
@@ -326,12 +395,41 @@ def _check_telemetry(root: Path, detected: Detected, src: _Src, out: list[Findin
         )
 
 
-def run_doctor(root: Path) -> DoctorResult:
+def run_doctor(root: Path, *, online: bool = False) -> DoctorResult:
+    """Static-check a project's Cendor wiring.
+
+    Args:
+        root: the project to inspect.
+        online: OPT-IN. Fetch the live release feed instead of comparing against the version snapshot
+            baked into this CLI. **Default False, and with False this function makes no network call
+            of any kind** — that is the contract, and a test asserts it. A failed fetch degrades to the
+            snapshot with an ``info`` finding: no internet is not a wiring problem.
+    """
     root = Path(root)
     detected = detect_project(root)
     src = _index(root)
     count, uses = _usage(src)
     findings: list[Finding] = []
+
+    latest_map: dict[str, str] | None = None
+    latest_as_of: str | None = None
+    if online:
+        from .online import OnlineLookupError, fetch_releases, pypi_map
+
+        try:
+            feed = fetch_releases()
+            latest_map = pypi_map(feed)
+            latest_as_of = str(feed.get("asOf") or "")
+        except OnlineLookupError as exc:
+            findings.append(
+                Finding(
+                    "info",
+                    "Could not reach the live release feed — using the bundled snapshot",
+                    f"{exc}. Version findings below compare against the snapshot baked into this CLI "
+                    f"(as of {version_snapshot.AS_OF}), which may be older than what is published.",
+                    f"Check {version_snapshot.RELEASES_URL} in a browser, or drop --online.",
+                )
+            )
 
     _check_stray_init(root, src, findings)
     _check_bare_import(root, src, findings)
@@ -341,7 +439,8 @@ def run_doctor(root: Path) -> DoctorResult:
 
     if detected.python:
         _check_py_providers(detected, src, findings)
-        _check_py_versions(detected, findings)
+        _check_py_versions(detected, findings, latest_map, latest_as_of)
+        _check_lockfile(detected, findings)
         _check_price_snapshot(detected, findings)
 
     if detected.node:

@@ -20,6 +20,7 @@ the MCP config, and scaffolds a working `instrument()` call. Offline, no key. A 
 
 ```bash
 pip install "cendor-sdk[openai,anthropic]"
+# Using uv? Same names, same extras: `uv add` instead of `pip install`.
 ```
 
 Provider SDKs are optional extras — `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`,

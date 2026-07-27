@@ -143,6 +143,7 @@ Every layer is optional — an ungoverned `run()` works with just `cendor-core` 
 
 ```bash
 pip install "cendor-sdk[openai,anthropic]"   # Python — provider SDKs are optional extras
+# Using uv? Same names, same extras: `uv add` instead of `pip install`.
 npm i @cendor/sdk openai                     # TypeScript/JS — providers are peer dependencies
 ```
 
