@@ -11,6 +11,13 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 
 ![PyPI](https://img.shields.io/pypi/v/cendor-sdk) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![License](https://img.shields.io/badge/license-Apache_2.0-blue) [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff) ![types: mypy](https://img.shields.io/badge/types-mypy-blue) ![CI](https://github.com/cendorhq/cendor-sdk/actions/workflows/ci.yml/badge.svg)
 
+<!-- cendor:downloads:start — self-hosted badges from cendor.ai (no third party in the render path).
+     The numbers live inside the SVGs, regenerated daily from the committed ledger, so this file
+     never goes stale. PyPI excludes index mirrors; npm publishes no mirror filter, which is why the
+     two are shown separately and never summed. Method: https://cendor.ai/downloads -->
+[![PyPI · cendor-sdk](https://cendor.ai/badge/downloads/cendor-sdk.svg)](https://cendor.ai/downloads) [![all Cendor · PyPI](https://cendor.ai/badge/downloads/pypi.svg)](https://cendor.ai/downloads) [![all Cendor · npm](https://cendor.ai/badge/downloads/npm.svg)](https://cendor.ai/downloads)
+<!-- cendor:downloads:end -->
+
 [**Install**](#install) · [**Governed in 10 lines**](#a-governed-agent-in-10-lines) · [**Why different**](#why-its-different) · [**Providers**](#every-major-provider--one-canonical-loop) · [**Docs**](#docs)
 
 *provider-agnostic · local-first · offline by default · sync **and** async*
