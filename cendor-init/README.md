@@ -3,6 +3,8 @@
 **One command to make your project Cendor-ready and Cendor-fluent for your AI assistant** — plus a
 `doctor` that catches the wiring mistakes before they bite. Offline: no network, no API key.
 
+![PyPI](https://img.shields.io/pypi/v/cendor-init) ![license](https://img.shields.io/badge/license-Apache_2.0-blue) · `uvx cendor-init`
+
 ```bash
 uvx cendor-init            # detect + write assistant rules files (idempotent)
 uvx cendor-init doctor     # validate the wiring; exit 1 on hard problems (CI-usable)

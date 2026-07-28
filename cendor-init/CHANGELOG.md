@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Offline versions snapshot refreshed: `cendor-acttrace` 1.14.0 (`@cendor/acttrace` 3.1.0).
+  `https://cendor.ai/releases.json` remains the source of truth — `doctor --online` reads it, and
+  `doctor` without the flag compares against this bundled snapshot.
+
 ## 0.3.0 — 2026-07-27
 
 - **`doctor --online`** — opt-in. Compares your installed/pinned versions against the live feed at
@@ -19,8 +23,9 @@
   Honest limit: it reads the lock as text. It reports what is pinned; it does not resolve.
 - Offline versions snapshot refreshed to the 2026-07-27 shelf (`cendor-core` 1.14.2 /
   `@cendor/core` 0.16.2, `cendor-cassette` 1.1.1, `cendor-guardrails` 1.6.1). The snapshot and its
-  TypeScript twin are now **generated** from `cendor-site/src/data/versions.json` — five hand-synced
-  files became one edited and four generated, after they drifted on 2026-07-26.
+  TypeScript twin are now **generated** from a single maintainer-side version source (the same one
+  that publishes `https://cendor.ai/releases.json`) — five hand-synced files became one edited and
+  four generated, after they drifted on 2026-07-26.
 
 - Offline versions snapshot refreshed to the 2026-07-24 shelf (`cendor-sdk` 1.17.0 / `@cendor/sdk`
   0.21.1; `/releases` remains the source of truth).
