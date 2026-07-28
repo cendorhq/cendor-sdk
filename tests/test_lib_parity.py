@@ -1,4 +1,4 @@
-"""SDK↔lib surface-parity + identity pins (W2, plan/PLAN-SDK-LIB-INHERITANCE.md).
+"""SDK↔lib surface-parity + identity pins.
 
 Makes inheritance drift LOUD instead of silent: every re-export the docs call "the identical
 library object" is pinned with ``is``; the ``sdk.rules`` namespace is diffed against the library's

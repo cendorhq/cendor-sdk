@@ -1,6 +1,6 @@
 """`Agent(id=…)` → `gen_ai.agent.id`, and the actor on every governance row (W4 / S4).
 
-Measured 2026-07-26 (`plan/REPORT-MONITOR-DOORS-FITGAP-2026-07-26.md`):
+Measured 2026-07-26, against a real run recorded in a monitor store:
 
 * `gen_ai.agent.id` was **never emitted and never stored** — an agent was a string-only label, so
   two agents sharing a name across apps collided and a rename lost the history.
