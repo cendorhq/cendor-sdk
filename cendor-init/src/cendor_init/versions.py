@@ -1,7 +1,7 @@
 """Committed FALLBACK snapshot of published versions.
 
-GENERATED — do not hand-edit. Source: cendor-site/src/data/versions.json; regenerate with
-``node scripts/gen-version-mirrors.mjs`` in cendor-site.
+GENERATED — do not hand-edit; a maintainer regenerates it from Cendor's single version source,
+and a hand edit is overwritten.
 
 ``doctor`` reads this OFFLINE to decide whether an installed / pinned cendor package is behind —
 it is only a hint; the live source of truth is https://cendor.ai/releases.json, which
