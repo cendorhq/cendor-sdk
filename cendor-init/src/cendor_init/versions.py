@@ -11,7 +11,7 @@ matching numbers, is the contract.
 
 from __future__ import annotations
 
-AS_OF = "2026-07-27"
+AS_OF = "2026-07-28"
 
 #: The live machine-readable feed ``doctor --online`` fetches.
 RELEASES_URL = "https://cendor.ai/releases.json"
