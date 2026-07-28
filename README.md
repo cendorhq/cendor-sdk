@@ -287,6 +287,11 @@ CI runs the above plus a **namespace-guard** check (no `src/cendor/__init__.py`)
 Releases are tag-triggered (`v*.*.*`) and publish to PyPI via OIDC trusted publishing
 (`.github/workflows/release.yml`). The PyPI page is rendered from [`README-pypi.md`](README-pypi.md).
 
+Contributing: [`CONTRIBUTING.md`](CONTRIBUTING.md) (setup, the gates, PR conventions) ·
+[`CLAUDE.md`](CLAUDE.md) (the cardinal rules, for humans and AI assistants alike) ·
+[`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md). Found a security problem? Please don't open a public
+issue — see [`SECURITY.md`](SECURITY.md).
+
 ## License & disclaimer
 
 Licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
