@@ -263,8 +263,10 @@ const result = await run(agent, 'Weather in Paris?');
 **`StreamEvent` union** — `TextDelta` (a chunk of the visible answer), `ThinkingDelta` (a chunk of
 streamed **reasoning/thinking**, kept separate from the answer), `ToolCallEvent` (a tool is about to
 run), `ToolResultEvent` (a tool returned its result), and the terminal `RunComplete` (which carries
-the same `Result` a blocking `run()` returns). Token-by-token reassembly is native for the OpenAI
-family + Ollama (tool-call deltas included); other providers fall back to a whole-response delta.
+the same `Result` a blocking `run()` returns). Token-by-token reassembly is native on the OpenAI
+**Chat** family (Hugging Face, Azure AI Foundry, and Foundry Local ride the same client), on
+**Anthropic**, and on Ollama — tool-call deltas included. OpenAI **Responses**, Gemini, and Bedrock
+make a non-streamed call and yield the answer as one delta: same events, coarser granularity.
 Multi-agent handoff runs stream too ([Multi-agent](multi-agent.md)).
 
 `ThinkingDelta` (SDK 1.13 / 0.18) is emitted **only** for providers that stream reasoning as it is
@@ -432,8 +434,10 @@ Python's equivalents differ — e.g. Python has no in-memory session *store*, ju
 
 - **The loop is bounded, not clever.** `max_turns` is the only termination guarantee; a model
   that never answers finishes `incomplete`, it doesn't error.
-- **Token-level streaming is OpenAI-family + Ollama.** Other providers stream one whole-response
-  delta — same events, coarser granularity.
+- **Token-level streaming is the OpenAI Chat family, Anthropic, and Ollama** (plus Hugging Face,
+  Azure AI Foundry, and Foundry Local, which ride the OpenAI Chat client). OpenAI Responses, Gemini,
+  and Bedrock fall back to a non-streamed call and yield one whole-response delta — same events,
+  coarser granularity.
 - **`ThinkingDelta` needs a provider that streams reasoning** (Ollama `think` models,
   OpenAI-compatible `reasoning_content`); others yield none. And a text-estimated streamed usage count
   can't see thinking tokens — they aren't in the streamed text — so it undercounts reasoning spend

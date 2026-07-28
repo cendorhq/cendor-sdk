@@ -1,17 +1,20 @@
 # cendor-init
 
 **One command to make your project Cendor-ready and Cendor-fluent for your AI assistant** — plus a
-`doctor` that catches the wiring mistakes before they bite. Offline: no network, no API key.
+`doctor` that catches the wiring mistakes before they bite. Offline by default: no API key, and no
+network call unless you ask for one.
 
 ![PyPI](https://img.shields.io/pypi/v/cendor-init) ![license](https://img.shields.io/badge/license-Apache_2.0-blue) · `uvx cendor-init`
 
 ```bash
 uvx cendor-init            # detect + write assistant rules files (idempotent)
 uvx cendor-init doctor     # validate the wiring; exit 1 on hard problems (CI-usable)
+uvx cendor-init doctor --online   # same, but check versions against the live release feed
 ```
 
 > Optional developer tooling — dependency-free stdlib. It writes files and inspects your project; it
-> makes **no network call**, and no Cendor library depends on it at runtime. (Node users:
+> makes **no network call** unless you pass `doctor --online`, and no Cendor library depends on it at
+> runtime. (Node users:
 > `npx @cendor/init`.) This is the Python twin of `@cendor/init`; both share the same behavior.
 
 ## What `init` does
@@ -35,8 +38,8 @@ uvx cendor-init doctor     # validate the wiring; exit 1 on hard problems (CI-us
    **`Agent`** loop (budget + guardrails + `guard` + audit) when `cendor-sdk` / `@cendor/sdk` is
    detected, otherwise an `instrument()` + budgeted-call example.
 
-The rules content is a copy of section 3 of the docs source of truth,
-[`for-ai-assistants`](https://cendor.ai/docs/for-ai-assistants).
+The rules content is a copy of the docs source of truth,
+[Rules files](https://cendor.ai/docs/assistant-rules) — kept in sync, never forked.
 
 ## What `doctor` checks
 
@@ -49,13 +52,29 @@ works in CI:
   pulls one for you; they are optional extras). Uses the installed environment when available.
 - **`instrument()` once** — warns if Cendor is imported but the client is never wrapped.
 - **Money** — flags coercing a price/cost to `float` (it should stay `Decimal`).
-- **Versions** — warns when an installed/pinned `cendor-*` version trails the latest release.
+- **Telemetry wiring** — a committed `CENDOR_TELEMETRY=off` beside a configured OpenTelemetry
+  provider, or an OTel pipeline on a `cendor-*` older than the version that emits on its own. Neither
+  raises at runtime — the emitters are deliberately silent.
+- **Versions** — warns when an installed/pinned `cendor-*` version trails the latest release, or when
+  the installed `cendor-core`'s bundled price snapshot is more than 30 days old.
+- **Lockfiles** — reads `uv.lock` / `poetry.lock` / `pdm.lock` and names the **lock** when the lock is
+  what's holding Cendor back: a declared range can be perfectly wide while the lock beside it pins
+  something old, and the build stays green the whole time. Honest limit: it reads the lock as text —
+  it reports what is pinned, it does not resolve.
+
+**`doctor` is offline by default — no network call of any kind.** Add `--online` and the version check
+reads the live feed at `https://cendor.ai/releases.json` instead of the snapshot compiled into this
+CLI; that's the case that matters in CI, where the CLI itself is pinned and its snapshot can be
+arbitrarily stale. An unreachable feed degrades to the snapshot with an `info` finding and never
+changes the exit code — being offline is not a wiring problem.
 
 ```bash
 uvx cendor-init --help
 ```
 
 ## Options
+
+`init` (the default command):
 
 | Flag | Effect |
 |---|---|
@@ -65,5 +84,11 @@ uvx cendor-init --help
 | `--scaffold` | also write a correct starter — a governed `Agent` when the SDK is present, else `instrument()`+budget |
 | `--force` | overwrite an owned file (`.cursor/rules/cendor.mdc`) even if not ours |
 | `--dry-run` | show what would change without writing |
+
+`doctor`:
+
+| Flag | Effect |
+|---|---|
+| `--online` | check versions against `https://cendor.ai/releases.json` instead of the bundled snapshot |
 
 Apache-2.0 · [cendor.ai](https://cendor.ai) · [For AI assistants](https://cendor.ai/docs/for-ai-assistants) · [MCP](https://cendor.ai/mcp)

@@ -33,31 +33,6 @@ A thin, provider-agnostic agent SDK where governance is the *foundation*, not a 
 ---
 
 
-## An agent can have an identity, not just a name (1.20.0)
-
-```python
-agent = Agent(name="support", model="gpt-4o", id="reg-42")   # id -> gen_ai.agent.id
-```
-
-A name is a label: two agents in two apps can share one, and renaming an agent loses its history. Pass
-`id=` and it rides the semconv `gen_ai.agent.id` on every span of that agent's turns — and on its
-governance rows, which is how a budget block finally says **which** agent it stopped (measured before
-1.20.0: 13 of 386 governance rows named their agent). Give no id and the attribute is simply **omitted**
-— never a hash of the name, never a placeholder. Needs `cendor-core >= 1.14` / `cendor-acttrace >= 1.13`.
-
-## Your runs show up in your backend, with no telemetry code (1.19.1)
-
-Configure an OpenTelemetry provider the way you already would (or point `OTEL_EXPORTER_OTLP_ENDPOINT`
-at [Cendor Monitor](https://cendor.ai/docs/monitor)) and `run()` does the rest: an `agent.run` root with
-its steps as children, usage/cost rollups, your `session` id as `gen_ai.conversation.id`, and — because
-the root is the active span — governance correlated to the run, including `governance.*` spans for the
-budget or guardrail that stopped it. An explicit `live_spans()`/`liveSpans()` still wins;
-`CENDOR_TELEMETRY=off` turns it all off; `CENDOR_DEBUG_TELEMETRY=1` says what was detected. Cendor has
-no endpoint, exporter or key — it emits into **your** provider. **Concurrent runs are attributed
-per run** since 1.19.1 / `@cendor/sdk` 0.23.2 — before that, two *overlapping* runs could render one
-run's call twice and lose the other's, because a scope learned its run from the first event on the
-process-wide bus.
-
 ## The problem
 
 Governance is best-effort *beneath* a framework — the framework owns the loop, so budgets, audit,
@@ -83,10 +58,11 @@ pip install "cendor-sdk[all]"                  # every provider + interop, batte
 
 Using an AI coding assistant? `npx @cendor/init` (TS) / `uvx cendor-init` (Python) wires it up — or point it at [cendor.ai/docs/for-ai-assistants](https://cendor.ai/docs/for-ai-assistants).
 
-The install bundles the whole Cendor stack (`cendor-core`, `tokenguard`, `acttrace`, `contextkit`,
-`squeeze`, `cassette`) by dependency — you install once and import only from `cendor.sdk`. Provider
-SDKs stay optional extras: `[openai]`, `[anthropic]`, `[google]`, `[bedrock]`, `[ollama]`,
-`[huggingface]`, `[azure]`, `[foundry-local]`, plus `[mcp]` and `[otel]`.
+The install bundles the whole Cendor stack — all seven libraries (`cendor-core`, `tokenguard`,
+`guardrails`, `acttrace`, `contextkit`, `squeeze`, `cassette`) — by dependency, so you install once
+and import only from `cendor.sdk`. Provider SDKs stay optional extras: `[openai]`, `[anthropic]`,
+`[google]`, `[bedrock]`, `[ollama]`, `[huggingface]`, `[azure]`, `[foundry-local]`, plus `[mcp]` and
+`[otel]`.
 
 ## A governed agent in 10 lines
 
@@ -125,8 +101,11 @@ result = run(Agent(name="a", model="gpt-4o", instructions="Be brief."), "Hi")
 result = await run.aio(agent, "Hi")   # same call, async
 ```
 
-> `run.aio` is natively async for OpenAI (Chat + Responses), Anthropic, Ollama, and Hugging Face.
-> Gemini and Bedrock have no native async client, so `run.aio` runs them synchronously for now.
+> `run.aio` is natively async for OpenAI (Chat + Responses — and the Azure AI Foundry / Foundry Local
+> paths that use the same client), Anthropic, Google Gemini (google-genai's
+> `aio.models.generate_content`), Ollama, and Hugging Face. Bedrock's boto3 `converse` is blocking, so
+> `run.aio` offloads it to a worker thread (`asyncio.to_thread`) — the event loop keeps running, and
+> the run's governance scope still attaches.
 
 ## Two doors, one stack
 
@@ -195,6 +174,28 @@ print(result.agents)     # ["planner", "writer"]
 `Agent(max_usd=...)` caps a single agent's segment; `supervisor()` gives you a router, and
 `sequential()` / `parallel()` the pipeline shapes.
 
+## Observability — your OTel backend, zero telemetry code
+
+Configure an OpenTelemetry provider the way you already would (or point `OTEL_EXPORTER_OTLP_ENDPOINT`
+at [Cendor Monitor](https://cendor.ai/docs/monitor)) and `run()` does the rest: an `agent.run` root
+span with each step as a child, usage and cost rollups, your `session` id as
+`gen_ai.conversation.id`, and — because the root is the active span — governance correlated to the
+run, including the `governance.*` span for the budget or guardrail that stopped it. Concurrent runs
+each land under their own root. An explicit `live_spans()` still wins; `CENDOR_TELEMETRY=off`
+turns it all off; `CENDOR_DEBUG_TELEMETRY=1` says what was detected. Cendor has no endpoint,
+exporter, or key — it emits into **your** provider.
+
+An agent can also carry an **identity**, not just a name:
+
+```python
+agent = Agent(name="support", model="gpt-4o", id="reg-42")   # id -> gen_ai.agent.id
+```
+
+A name is a label — two agents in two apps can share one, and renaming an agent loses its history.
+Pass `id=` and it rides the semconv `gen_ai.agent.id` attribute on every span of that agent's turns
+— and on its governance rows, so a budget block says **which** agent it stopped. Give no id and the
+attribute is simply omitted — never a hash of the name, never a placeholder.
+
 ## Every major provider — one canonical loop
 
 The provider is inferred from the model id (override with `provider=`). History is held in one
@@ -215,7 +216,7 @@ canonical shape, so a run can **hand off between providers** without rewriting i
 
 Everything a real agent needs — all governed through the same seams:
 
-- **Streaming** — `run.stream` / `run.astream` yield text deltas + tool events (native for the OpenAI family + Ollama).
+- **Streaming** — `run.stream` / `run.astream` yield text deltas + tool events. Incremental token-level deltas on the OpenAI Chat family (including Azure AI Foundry, Foundry Local, and Hugging Face), Anthropic (typed SSE deltas, thinking included), and Ollama; OpenAI *Responses*, Gemini, and Bedrock yield the whole response as one delta.
 - **Structured output** — a dataclass / Pydantic / JSON-schema `output_type` uses each provider's native schema mode.
 - **Reasoning & control** — `Agent.extra` passes `tool_choice`, `reasoning_effort`, `top_p`, `stop`, …; o-series `temperature` is handled for you.
 - **RAG** — `VectorIndex` + `Agent(retriever=…)` inject governed retrieval, or expose your store as a `@tool`.
@@ -234,7 +235,7 @@ with budget(usd=0.50, on_exceed="downgrade", downgrade={"gpt-4o": "gpt-4o-mini"}
 
 ## Design principles
 
-1. **Cooperate through core.** The SDK hard-depends only on `cendor-core`; every governance tool integrates through core's bus and interceptor seams — nothing patches anything.
+1. **Cooperate through core.** The SDK adds no governance machinery of its own — it bundles the seven libraries and attaches each one to the loop through `cendor-core`'s bus and interceptor seams. Nothing patches anything, and the libraries never import each other.
 2. **Governed by default, escapable.** Each layer is one argument or one `with` block; removing it never breaks the loop.
 3. **Local-first, no servers.** Sessions, checkpoints, audit chains, and cassettes are local files. Cloud and OpenTelemetry export are optional and opt-in.
 4. **Same API in both languages.** `snake_case` ↔ `camelCase`, identical defaults and error names — see the [parity matrix](https://cendor.ai/docs/languages). Also available as [`@cendor/sdk`](https://github.com/cendorhq/cendor-sdk-js) on npm.
@@ -257,15 +258,19 @@ searchable site with a page-wide **Python / TypeScript** toggle at
 |---|---|
 | [docs/index.md](docs/index.md) | Start here — which door, the pages, what "governed" means |
 | [docs/getting-started.md](docs/getting-started.md) | Install (pip / npm), a first governed agent, where each concept lives |
+| [docs/architecture.md](docs/architecture.md) | The two layers — which of the seven libraries powers which SDK surface |
 | [docs/agents.md](docs/agents.md) | `Agent`, `tool`, `run`, `Result`, structured output, streaming, multimodal |
 | [docs/governance.md](docs/governance.md) | Budgets, attribution, audit + redaction, record/replay testing |
+| [docs/guardrails.md](docs/guardrails.md) | `Agent(guardrails=[…])` — gating the user turn, tool call, tool result, final answer |
 | [docs/memory.md](docs/memory.md) | Sessions, durable stores, summarization, window fitting |
 | [docs/rag.md](docs/rag.md) | Governed embeddings, `VectorIndex`, always-on & agentic retrieval |
 | [docs/multi-agent.md](docs/multi-agent.md) | Handoff, supervisor/router, sequential & parallel |
 | [docs/providers.md](docs/providers.md) | The ten provider paths; HF / Azure AI Foundry / Foundry Local setup |
+| [docs/observability.md](docs/observability.md) | Exporting the run's `gen_ai` span tree to your OTel backend, or Cendor Monitor |
 | [docs/interop.md](docs/interop.md) | MCP, A2A, Foundry/Copilot, OTel span tree, human-in-the-loop |
 | [docs/hardening.md](docs/hardening.md) | Retries, checkpointed/resumable runs, durable memory |
 | [docs/eval.md](docs/eval.md) | Cassette-backed governed eval & regression testing |
+| [docs/for-ai-assistants.md](docs/for-ai-assistants.md) | Making an AI assistant fluent in the SDK — Type Teach, rules files, MCP, `init` |
 | [docs/faq.md](docs/faq.md) | Common questions — including "libraries or SDK?" |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |
 | [examples/](examples/) | Runnable, network-free examples |
