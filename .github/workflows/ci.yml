@@ -24,33 +24,21 @@ jobs:
       run:
         shell: bash   # Git Bash on the Windows runner, so `find`/heredocs work cross-platform
     steps:
-      # cendor-libs is a PRIVATE sibling repo; the default GITHUB_TOKEN cannot read it (404), and the
-      # dev [tool.uv.sources] override in pyproject resolves cendor-* from ../cendor-libs/packages/*.
-      # Degrade gracefully on the token: if a SIBLING_CHECKOUT_TOKEN PAT (read access to
-      # cendorhq/cendor-libs) is set, check the sibling out and test against LOCAL sources; if it is
-      # absent, skip the checkout and set UV_NO_SOURCES=1 so uv ignores the sources table and resolves
-      # the PUBLISHED cendor-* from PyPI — CI stays green and meaningful either way, no secret required.
-      # Once cendor-libs is public, drop this decision step + the sibling checkout's token: line.
-      - name: Decide dependency source (local sibling vs published PyPI)
-        id: deps
-        env:
-          SIBLING_CHECKOUT_TOKEN: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
-        run: |
-          if [ -n "$SIBLING_CHECKOUT_TOKEN" ]; then
-            echo "sibling=true" >> "$GITHUB_OUTPUT"
-            echo "cendor-* -> LOCAL cendor-libs sibling checkout"
-          else
-            echo "sibling=false" >> "$GITHUB_OUTPUT"
-            echo "UV_NO_SOURCES=1" >> "$GITHUB_ENV"   # applies to every later uv sync / uv run step
-            echo "SIBLING_CHECKOUT_TOKEN absent -> testing against PUBLISHED cendor-* from PyPI"
-          fi
-      - name: Check out cendor-libs sibling (only when the PAT is present)
-        if: steps.deps.outputs.sibling == 'true'
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
-        with:
-          repository: cendorhq/cendor-libs
-          token: ${{ secrets.SIBLING_CHECKOUT_TOKEN }}
-          path: cendor-libs      # the dev source override in pyproject resolves ../cendor-libs/packages/*
+      # DEPENDENCY SOURCE: this job tests `cendor-sdk` against the **PUBLISHED** `cendor-*` packages
+      # from PyPI — `UV_NO_SOURCES=1` makes uv ignore the dev `[tool.uv.sources]` override in
+      # pyproject.toml (which otherwise resolves them from a sibling ../cendor-libs checkout).
+      #
+      # This is a deliberate choice, not a leftover. It is also exactly what this job has been doing:
+      # the old version branched on a SIBLING_CHECKOUT_TOKEN PAT — needed only because cendor-libs was
+      # private — and that secret was never set, so every run took the published-PyPI path. The flip
+      # (2026-07-29) removed the reason for the PAT, so the branch is gone rather than inverted.
+      #
+      # Testing against published packages is what a user actually installs, and it keeps this repo's
+      # CI independent of unreleased sibling work. THE ALTERNATIVE, if you want integration breaks
+      # caught before a release instead: check out cendorhq/cendor-libs to `path: cendor-libs` (no
+      # token required now) and drop the UV_NO_SOURCES line, which tests against sibling `main`.
+      - name: Resolve cendor-* from PyPI, not the dev sources override
+        run: echo "UV_NO_SOURCES=1" >> "$GITHUB_ENV"   # applies to every later uv sync / uv run step
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v5
         with:
           path: cendor-sdk
