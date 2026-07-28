@@ -3,6 +3,7 @@ fixtures for every provider shape, so response-shape drift is caught here in iso
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -29,6 +30,7 @@ from cendor.sdk.providers import (
     resolve_provider,
     tool_result_message,
 )
+from cendor.sdk.runner import _schema_from_output_type
 from cendor.sdk.tools import tool
 
 
@@ -567,6 +569,76 @@ def test_gemini_thought_signature_round_trips():
     assert any(p.get("thought_signature") == "SIG123" for p in parts), f"not re-emitted: {parts}"
 
 
+def test_gemini3_foreign_unsigned_function_call_is_replayed_as_text():
+    """A cross-provider handoff INTO a Gemini 3 agent must not 400 on a missing thought_signature.
+
+    The receiving agent replays the *supervisor's* history. A non-Gemini supervisor's
+    `transfer_to_*` call (and any real tool it called first) never carried a thought_signature, and
+    gemini-3.x rejects a replayed `function_call` that has none. No honest signature exists for a
+    call another provider made, so the turn goes back as text instead — nothing is fabricated.
+    """
+    hist = [
+        {"role": "user", "content": "refund my order 42"},
+        assistant_message(
+            None,
+            [
+                ToolInvocation(
+                    id="call_9xKq3",
+                    name="transfer_to_research",
+                    arguments={"topic": "refund policy"},
+                )
+            ],
+        ),
+        tool_result_message("call_9xKq3", "transfer_to_research", "transferred to research"),
+    ]
+    wire = json.dumps(
+        GeminiProvider().build_kwargs("gemini-3-pro-preview", hist, [], "")["contents"]
+    )
+    assert "function_call" not in wire, "an unsigned foreign function_call still reaches gemini-3"
+    assert "function_response" not in wire, "the orphaned function_response still reaches gemini-3"
+    assert "thought_signature" not in wire, "a signature was fabricated"
+    # the information survives — as text the API always accepts
+    assert "transfer_to_research" in wire
+    assert "refund policy" in wire
+    assert "transferred to research" in wire
+    # older families never validated signatures — their payload must be untouched
+    older = json.dumps(GeminiProvider().build_kwargs("gemini-2.0-flash", hist, [], "")["contents"])
+    assert "function_call" in older
+
+
+def test_gemini3_own_signed_tool_turn_is_replayed_verbatim():
+    """Gemini's OWN tool turn is untouched: a turn with at least one signature came from Gemini (a
+    parallel-call turn signs only the first part), so it replays verbatim, signature included."""
+    parsed = GeminiProvider().parse(
+        {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "function_call": {"name": "get_weather", "args": {"city": "Paris"}},
+                                "thought_signature": "SIG123",
+                            },
+                            {"function_call": {"name": "get_time", "args": {"city": "Paris"}}},
+                        ]
+                    }
+                }
+            ]
+        }
+    )
+    hist = [
+        assistant_message(None, parsed.tool_calls),
+        tool_result_message(parsed.tool_calls[0].id, "get_weather", "Sunny in Paris"),
+    ]
+    wire = json.dumps(
+        GeminiProvider().build_kwargs("gemini-3-pro-preview", hist, [], "")["contents"]
+    )
+    assert "SIG123" in wire
+    assert "function_call" in wire
+    assert "get_time" in wire  # a partially-signed parallel turn is Gemini's own — verbatim
+    assert "function_response" in wire
+
+
 def test_multimodal_content_translation():
     """A multimodal user turn (text + images) maps to each provider's image blocks."""
     data_url = "data:image/png;base64,QUJD"
@@ -598,6 +670,88 @@ def test_multimodal_content_translation():
     assert any("file_data" in p for p in parts)
     # Bedrock: text kept (image bytes out of scope there)
     assert _canonical_to_bedrock(msg)[0]["content"][0]["text"] == "what is this?"
+
+
+@dataclass
+class _Line:  # module-level so annotations resolve under `from __future__ import annotations`
+    sku: str
+    qty: int
+
+
+@dataclass
+class _Order:
+    id: str
+    lines: list[_Line]  # a list of models
+    ship_to: _Address | None  # an optional model
+    note: str = "none"  # a defaulted field (not required)
+
+
+#: JSON-Schema / google-genai keys the Gemini `Schema` proto rejects on `response_schema`.
+_GEMINI_REJECTED = ("additionalProperties", "additional_properties", "$schema", "title", "default")
+
+
+def _rejected_keys(node) -> list[str]:
+    """Every rejected key found anywhere in a nested schema, as dotted-ish paths."""
+    found: list[str] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in _GEMINI_REJECTED:
+                found.append(k)
+            found.extend(_rejected_keys(v))
+    elif isinstance(node, list):
+        for v in node:
+            found.extend(_rejected_keys(v))
+    return found
+
+
+def test_gemini_output_schema_strips_keys_google_genai_rejects():
+    """A Gemini agent with an `output_type` must not emit a `response_schema` carrying
+    `additionalProperties`.
+
+    google-genai's `types.Schema` *accepts* the key (it has an `additional_properties` field, camel
+    alias `additionalProperties`), so nothing fails locally — it is forwarded to the Gemini
+    Developer API, which 400s on it. `_schema_from_output_type` stamps `additionalProperties: False`
+    on every dataclass object node, so `Agent(output_type=<dataclass>)` was broken on Gemini
+    outright. `to_gemini()` already sanitizes *tool* parameter schemas; `response_schema` did not go
+    through the same sanitizer.
+    """
+    schema = _schema_from_output_type(_Order)
+    gk = GeminiProvider().build_kwargs(
+        "gemini-2.0-flash", [], [], "", json_mode=True, output_schema=schema
+    )
+    emitted = gk["config"]["response_schema"]
+    assert _rejected_keys(emitted) == [], f"google-genai rejects these: {_rejected_keys(emitted)}"
+    # the useful schema survives, recursively
+    assert emitted["type"] == "object"
+    assert set(emitted["properties"]) == {"id", "lines", "ship_to", "note"}
+    assert emitted["required"] == ["id", "lines", "ship_to"]  # `note` has a default
+    assert set(emitted["properties"]["lines"]["items"]["properties"]) == {"sku", "qty"}
+    assert set(emitted["properties"]["ship_to"]["properties"]) == {"city", "postcode"}
+
+
+def test_gemini_output_schema_sanitizes_a_raw_dict_schema():
+    """A user-supplied `output_type={...}` schema (the OpenAI-strict idiom carries
+    `additionalProperties: False`) is sanitized too — including google-genai's own snake_case
+    spelling, which `process_schema` folds back to `additionalProperties` before the wire."""
+    raw = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "Answer",
+        "type": "object",
+        "properties": {"answer": {"type": "string", "title": "Answer", "default": ""}},
+        "required": ["answer"],
+        "additional_properties": False,  # google-genai's snake_case spelling of the same key
+    }
+    gk = GeminiProvider().build_kwargs(
+        "gemini-2.0-flash", [], [], "", json_mode=True, output_schema=raw
+    )
+    emitted = gk["config"]["response_schema"]
+    assert _rejected_keys(emitted) == [], f"google-genai rejects these: {_rejected_keys(emitted)}"
+    assert emitted == {
+        "type": "object",
+        "properties": {"answer": {"type": "string"}},
+        "required": ["answer"],
+    }
+    assert raw["additional_properties"] is False  # the caller's dict is not mutated
 
 
 def test_openai_multimodal_passthrough():

@@ -34,12 +34,15 @@ import functools
 import inspect
 import json
 import os
+import re
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from cendor.core import instrument
+
+from .tools import _gemini_sanitize
 
 if TYPE_CHECKING:
     from .tools import Tool
@@ -1114,6 +1117,106 @@ def _canonical_to_gemini(messages: list[dict]) -> list[dict]:
     return out
 
 
+#: A Gemini family that *validates* thought signatures on a replayed function call (3.x and later).
+#: ``gemini-2.0-flash`` / ``gemini-1.5-pro`` never did.
+_GEMINI_SIGNATURE_FAMILY_RE = re.compile(r"gemini-(\d+)")
+
+
+def _gemini_validates_signatures(model: str) -> bool:
+    """Whether ``model`` is a Gemini family that rejects an unsigned replayed ``function_call``."""
+    m = _GEMINI_SIGNATURE_FAMILY_RE.search(model.lower())
+    return m is not None and int(m.group(1)) >= 3
+
+
+def _textify_foreign_calls(contents: list[dict], model: str) -> list[dict]:
+    """Replay a **foreign** provider's function call as text so a Gemini 3.x request stays valid.
+
+    Gemini 3.x rejects a replayed ``function_call`` that carries no ``thought_signature`` (400,
+    "missing thought_signature"). A cross-provider handoff replays the *supervisor's* history into
+    the receiving agent — a non-Gemini supervisor's ``transfer_to_*`` call, and any real tool it
+    called before that — and none of those ever had a signature.
+
+    **Nothing is fabricated.** A thought signature is an opaque token Google issues over *Gemini's
+    own* reasoning for that context: minting one would misrepresent provenance and would be rejected
+    as invalid anyway. So the turn is re-emitted as a text part that states the call, and its
+    matching ``function_response`` follows as text — semantically the same information, in a shape
+    the API always accepts. Nothing is dropped either.
+
+    Scope is deliberately narrow, so Gemini's own loops are byte-identical to before:
+
+    * only for models that validate (see :func:`_gemini_validates_signatures`);
+    * only for a model turn where **not one** function-call part carries a signature. A turn with at
+      least one signature came from Gemini itself (a parallel-call turn signs only the first part)
+      and is replayed verbatim.
+    """
+    if not _gemini_validates_signatures(model):
+        return contents
+    out: list[dict] = []
+    textified: set[str] = set()  # call names degraded in the model turn just emitted
+    for turn in contents:
+        parts = turn.get("parts")
+        if not isinstance(parts, list):
+            textified = set()
+            out.append(turn)
+            continue
+        if turn.get("role") == "model":
+            calls = [p for p in parts if isinstance(p, dict) and p.get("function_call") is not None]
+            if not calls or any(p.get("thought_signature") is not None for p in calls):
+                textified = set()
+                out.append(turn)
+                continue
+            textified = {
+                str((p.get("function_call") or {}).get("name") or "")
+                for p in calls
+                if (p.get("function_call") or {}).get("name")
+            }
+            out.append(
+                {
+                    "role": "model",
+                    "parts": [
+                        {
+                            "text": f"Called tool {(p['function_call'] or {}).get('name', '')} "
+                            f"with {json.dumps((p['function_call'] or {}).get('args') or {})}"
+                        }
+                        if isinstance(p, dict) and p.get("function_call") is not None
+                        else p
+                        for p in parts
+                    ],
+                }
+            )
+            continue
+        if textified and any(
+            isinstance(p, dict) and p.get("function_response") is not None for p in parts
+        ):
+            out.append(
+                {
+                    "role": turn.get("role", "user"),
+                    "parts": [
+                        _foreign_response_part(p, textified)
+                        if isinstance(p, dict) and p.get("function_response") is not None
+                        else p
+                        for p in parts
+                    ],
+                }
+            )
+            textified = set()
+            continue
+        textified = set()
+        out.append(turn)
+    return out
+
+
+def _foreign_response_part(part: dict, textified: set[str]) -> dict:
+    """One ``function_response`` part as text, when its matching call was degraded to text."""
+    fr = part.get("function_response") or {}
+    name = str(fr.get("name") or "")
+    if name not in textified:
+        return part
+    response = fr.get("response")
+    result = response.get("result") if isinstance(response, dict) else None
+    return {"text": f"Result of {name}: {_stringify(result if result is not None else response)}"}
+
+
 def _canonical_to_bedrock(messages: list[dict]) -> list[dict]:
     """Translate canonical (OpenAI-shape) history to Bedrock Converse ``messages``.
 
@@ -1199,7 +1302,9 @@ class GeminiProvider(Provider):
         max_tokens: int | None = None,
         output_schema: dict | None = None,
     ) -> dict:
-        contents = _canonical_to_gemini(messages)
+        # A cross-provider handoff replays a foreign provider's unsigned function_call; gemini-3.x
+        # 400s on one, and no honest signature exists for it — see _textify_foreign_calls.
+        contents = _textify_foreign_calls(_canonical_to_gemini(messages), model)
         config: dict[str, Any] = {}
         if instructions:
             config["system_instruction"] = instructions
@@ -1213,7 +1318,13 @@ class GeminiProvider(Provider):
         elif json_mode:  # Gemini can't combine function tools with a forced JSON schema
             config["response_mime_type"] = "application/json"
             if output_schema:
-                config["response_schema"] = output_schema
+                # Same sanitizer as a tool declaration (Tool.to_gemini): google-genai's
+                # ``types.Schema`` *accepts* ``additionalProperties`` (it has an
+                # ``additional_properties`` field), so nothing fails locally — the key is forwarded
+                # and the Gemini API 400s on it. ``_schema_from_output_type`` stamps
+                # ``additionalProperties: False`` on every dataclass object node, so
+                # ``Agent(output_type=…)`` did not work on Gemini at all.
+                config["response_schema"] = _gemini_sanitize(output_schema)
         kwargs: dict[str, Any] = {"model": model, "contents": contents}
         if config:
             kwargs["config"] = config

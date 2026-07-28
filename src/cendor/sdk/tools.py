@@ -123,11 +123,26 @@ def _parse_arg_docs(doc: str) -> dict[str, str]:
 
 
 #: JSON-Schema keys the Gemini ``Schema`` proto rejects (stripped by :func:`_gemini_sanitize`).
-_GEMINI_DROP_KEYS = frozenset({"additionalProperties", "$schema", "title", "default"})
+#:
+#: ``additional_properties`` is google-genai's own snake_case spelling of the same key: its
+#: ``types.Schema`` declares the field (camel alias ``additionalProperties``) and
+#: ``_transformers.process_schema`` folds one spelling into the other, so **both** reach the wire —
+#: and the Gemini Developer API 400s on it. ``$defs``/``$ref`` are deliberately NOT dropped:
+#: google-genai inlines them before sending, and removing only one of the pair would break a nested
+#: model's schema outright.
+_GEMINI_DROP_KEYS = frozenset(
+    {"additionalProperties", "additional_properties", "$schema", "title", "default"}
+)
 
 
 def _gemini_sanitize(schema: Any) -> Any:
-    """Recursively strip JSON-Schema keys Gemini rejects (e.g. ``additionalProperties``)."""
+    """Recursively strip JSON-Schema keys Gemini rejects (e.g. ``additionalProperties``).
+
+    Returns a new structure — the caller's schema dict is never mutated. Used for both a tool's
+    ``parameters`` (:meth:`Tool.to_gemini`) and an agent's ``output_type`` schema on
+    ``config.response_schema`` (``providers.GeminiProvider.build_kwargs``); one sanitizer, so the
+    two can't drift.
+    """
     if isinstance(schema, dict):
         return {k: _gemini_sanitize(v) for k, v in schema.items() if k not in _GEMINI_DROP_KEYS}
     if isinstance(schema, list):
