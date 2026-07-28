@@ -1,0 +1,118 @@
+name: Bug report
+description: cendor-sdk (or the cendor-init CLI) behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Two quick routing notes before you start:
+
+        - **Security vulnerability?** Do not open a public issue — report it privately through
+          [GitHub Private Vulnerability Reporting](https://github.com/cendorhq/cendor-sdk/security/advisories/new)
+          (details in [`SECURITY.md`](https://github.com/cendorhq/cendor-sdk/blob/main/SECURITY.md)).
+        - **Wrong repo?** If the flaw is in a library *beneath* the SDK — `cendor-core`,
+          `cendor-tokenguard`, `cendor-guardrails`, `cendor-acttrace`, `cendor-contextkit`,
+          `cendor-squeeze`, `cendor-cassette` — file it on
+          [cendor-libs](https://github.com/cendorhq/cendor-libs/issues). The TypeScript SDK is
+          [cendor-sdk-js](https://github.com/cendorhq/cendor-sdk-js/issues). If you are unsure, file
+          here and we will route it.
+  - type: dropdown
+    id: artifact
+    attributes:
+      label: Which artifact?
+      options:
+        - cendor-sdk (the agent SDK)
+        - cendor-init (the offline init/doctor CLI — `uvx cendor-init`)
+        - Not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: cendor-sdk 1.19.0
+    validations:
+      required: true
+  - type: input
+    id: lib-versions
+    attributes:
+      label: Installed cendor-* library versions
+      description: The SDK re-exports the real library objects, so the version beneath it matters. `pip freeze | grep cendor` (paste the whole set).
+      placeholder: cendor-core 1.14.1, cendor-acttrace 1.13.0, cendor-tokenguard 1.6.0, …
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version and OS
+      placeholder: Python 3.12.7, uv 0.9.4, Ubuntu 24.04
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which provider path?
+      description: The normalization path the run took. Pick the fake/stub option if your repro drives a provider-shaped stub — that is the fastest kind of repro for us.
+      options:
+        - None — a fake/stub client, or the bug is not provider-specific
+        - OpenAI (Chat Completions)
+        - OpenAI (Responses API)
+        - Anthropic (Messages)
+        - Google Gemini (google-genai)
+        - AWS Bedrock (boto3 converse)
+        - Ollama (local)
+        - Hugging Face (InferenceClient)
+        - Azure AI Foundry (Chat)
+        - Azure AI Foundry (Responses)
+        - Foundry Local (on-device)
+        - Microsoft 365 Agents SDK host (pro-code custom engine agent)
+    validations:
+      required: true
+  - type: input
+    id: extras
+    attributes:
+      label: Which extras did you install?
+      description: Provider SDKs are optional extras, never hard dependencies — the exact extras change what is importable.
+      placeholder: cendor-sdk[openai,otel]
+  - type: dropdown
+    id: entrypoint
+    attributes:
+      label: Which entry point?
+      options:
+        - "run(agent, …) — sync"
+        - "run.aio(agent, …) — async"
+        - "run.stream(…) / run.astream(…) — streaming"
+        - Multi-agent (handoff / sequential / parallel / supervisor)
+        - Interop (MCP tools, A2A, FoundryAdapter)
+        - Sessions / memory / checkpoint-resume
+        - Eval harness (`evaluate`)
+        - Governance scope (budget / guard / Policy / AuditLog / trace)
+        - Other / not sure
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: The smallest agent + run that shows it. An **offline** repro is fastest — the whole test suite runs with no key and no network (provider HTTP mocked with `respx`, or a recorded `cassette` fixture).
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Traceback or output
+      description: Paste the traceback, the `Result` fields involved, or the audit/budget numbers. Please redact keys and any real customer content.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I am on the latest released `cendor-sdk`, or I have said above which version I am on and why.
+        - label: This is not a security vulnerability (those go through private reporting, linked above).
+        - label: Nothing I pasted contains an API key, a token, or real customer data.
