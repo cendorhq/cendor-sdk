@@ -3,6 +3,7 @@ fixtures for every provider shape, so response-shape drift is caught here in iso
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -31,7 +32,7 @@ from cendor.sdk.providers import (
     tool_result_message,
 )
 from cendor.sdk.runner import _schema_from_output_type
-from cendor.sdk.tools import tool
+from cendor.sdk.tools import _gemini_sanitize, tool
 
 
 def test_openai_chat_normalization_text():
@@ -727,6 +728,55 @@ def test_gemini_output_schema_strips_keys_google_genai_rejects():
     assert emitted["required"] == ["id", "lines", "ship_to"]  # `note` has a default
     assert set(emitted["properties"]["lines"]["items"]["properties"]) == {"sku", "qty"}
     assert set(emitted["properties"]["ship_to"]["properties"]) == {"city", "postcode"}
+
+
+def test_gemini_sanitize_keeps_field_names_that_collide_with_dropped_keywords():
+    """A model field named ``title`` or ``default`` must survive sanitizing.
+
+    The first version of ``_gemini_sanitize`` filtered the drop set at EVERY dict level, so a schema
+    whose *field names* collided with a JSON-Schema keyword had those fields deleted from its own
+    output contract while ``required`` still demanded them — a schema that contradicts itself, which
+    Gemini rejects or mis-fills. ``title`` and ``default`` are ordinary field names (a report, a
+    config record), so this was reachable by normal use, not a corner case.
+
+    Filtering is positional: drop a key only where it is read as a keyword, never where it is a name
+    the caller chose (``properties``, ``$defs``, ``patternProperties``, ``dependentSchemas``).
+    """
+    schema = {
+        "type": "object",
+        "title": "Report",  # keyword position -> dropped
+        "additionalProperties": False,  # keyword position -> dropped
+        "properties": {
+            "title": {"type": "string"},  # FIELD NAME -> kept
+            "default": {"type": "integer"},  # FIELD NAME -> kept
+            "body": {"type": "string", "default": "x"},  # keyword inside a field -> dropped
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {"default": {"type": "integer"}},  # FIELD NAME -> kept
+                },
+            },
+        },
+        "required": ["title", "default", "body", "rows"],
+        "$defs": {"default": {"type": "object", "properties": {"title": {"type": "string"}}}},
+    }
+    before = copy.deepcopy(schema)
+    out = _gemini_sanitize(schema)
+
+    # Every declared field survives, so `required` cannot reference a field that no longer exists.
+    assert sorted(out["properties"]) == ["body", "default", "rows", "title"]
+    assert not [f for f in out["required"] if f not in out["properties"]]
+    assert sorted(out["properties"]["rows"]["items"]["properties"]) == ["default"]
+    assert sorted(out["$defs"]) == ["default"]
+    assert sorted(out["$defs"]["default"]["properties"]) == ["title"]
+
+    # ...while the keys really are gone wherever they would be read as keywords.
+    assert "title" not in out and "additionalProperties" not in out
+    assert "default" not in out["properties"]["body"]
+    assert "additionalProperties" not in out["properties"]["rows"]["items"]
+    assert schema == before, "the caller's schema was mutated"
 
 
 def test_gemini_output_schema_sanitizes_a_raw_dict_schema():

@@ -134,6 +134,22 @@ _GEMINI_DROP_KEYS = frozenset(
     {"additionalProperties", "additional_properties", "$schema", "title", "default"}
 )
 
+#: Positions whose CHILD KEYS are user data, not JSON-Schema keywords.
+#:
+#: At these positions every key is a name the caller chose — a field name under ``properties``, a
+#: model name under ``$defs``, a regex under ``patternProperties`` — so the drop set must NOT be
+#: applied to the keys, only recursed into the values.
+#:
+#: ⚠️ Without this, a model with a field literally named ``title`` or ``default`` had that field
+#: SILENTLY DELETED from its own output contract while ``required`` still demanded it — a schema
+#: that contradicts itself. Measured on the first version of this sanitizer:
+#: ``{"properties": {"title": …, "default": …}, "required": ["title", "default"]}`` came back with
+#: ``properties`` empty and ``required`` unchanged. ``title`` and ``default`` are ordinary field
+#: names (a report, a config record), so this was reachable by normal use.
+_GEMINI_NAME_POSITIONS = frozenset(
+    {"properties", "$defs", "definitions", "patternProperties", "dependentSchemas"}
+)
+
 
 def _gemini_sanitize(schema: Any) -> Any:
     """Recursively strip JSON-Schema keys Gemini rejects (e.g. ``additionalProperties``).
@@ -142,9 +158,21 @@ def _gemini_sanitize(schema: Any) -> Any:
     ``parameters`` (:meth:`Tool.to_gemini`) and an agent's ``output_type`` schema on
     ``config.response_schema`` (``providers.GeminiProvider.build_kwargs``); one sanitizer, so the
     two can't drift.
+
+    Filtering is **positional**: a key is only dropped where it would be read as a schema keyword.
+    See :data:`_GEMINI_NAME_POSITIONS` for why filtering blindly deletes the caller's own fields.
     """
     if isinstance(schema, dict):
-        return {k: _gemini_sanitize(v) for k, v in schema.items() if k not in _GEMINI_DROP_KEYS}
+        out: dict[Any, Any] = {}
+        for k, v in schema.items():
+            if k in _GEMINI_DROP_KEYS:
+                continue
+            if k in _GEMINI_NAME_POSITIONS and isinstance(v, dict):
+                # Keep every name; sanitize only the schema each name maps to.
+                out[k] = {name: _gemini_sanitize(sub) for name, sub in v.items()}
+            else:
+                out[k] = _gemini_sanitize(v)
+        return out
     if isinstance(schema, list):
         return [_gemini_sanitize(v) for v in schema]
     return schema
