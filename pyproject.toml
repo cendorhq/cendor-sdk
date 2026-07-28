@@ -108,6 +108,19 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+# Markdown is documentation, not source — keep the formatter out of it.
+#
+# ruff 0.16.0 began formatting Python inside markdown by default. Measured 2026-07-28: that would
+# rewrite the code samples in 48 published files across the two Python repos and NOT ONE .py file —
+# every README, every docs page, and every bundled INTEGRATION.md. It collapses the deliberately
+# aligned trailing comments those samples use to teach, inserts blank lines, and wraps one-line
+# examples across three. `docs/for-ai-assistants.md` is worse than cosmetic: cendor-mcp parses its
+# canonical examples by hard-anchored slug, so reformatting them changes what the MCP server teaches.
+#
+# The docs are hand-written for a reader. Excluding them here is a no-op on the pinned 0.15.20 (which
+# does not touch markdown at all) and keeps the ruff version free to move.
+[tool.ruff.format]
+exclude = ["*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
