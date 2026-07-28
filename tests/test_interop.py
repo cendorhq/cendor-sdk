@@ -18,12 +18,13 @@ from cendor.sdk import (
     Agent,
     AuditLog,
     FoundryAdapter,
+    load_mcp_resources,
     load_mcp_tools,
     run,
     span_tree,
     tool,
 )
-from cendor.sdk.hitl import require_approval
+from cendor.sdk.hitl import always_approve, always_reject, require_approval
 
 
 @tool
@@ -89,6 +90,58 @@ async def test_mcp_tool_round_trip(build):
     assert session.calls == [("search_kb", {"query": "refunds"})]
     assert [s.name for s in result.tool_steps] == ["search_kb"]
     assert result.tool_steps[0].call.result == "KB result for refunds"
+
+
+class FakeMCPResourceSession:
+    """A duck-typed session whose resource reads use the MCP `ReadResourceResult` shape."""
+
+    async def list_tools(self):
+        return SimpleNamespace(tools=[])
+
+    async def call_tool(self, name, arguments):
+        return SimpleNamespace(content=[])
+
+    async def list_resources(self):
+        return SimpleNamespace(
+            resources=[
+                SimpleNamespace(uri="file://a.txt"),
+                SimpleNamespace(uri="file://multi.txt"),
+                SimpleNamespace(uri="file://logo.png"),
+                SimpleNamespace(uri="file://empty"),
+            ]
+        )
+
+    async def read_resource(self, uri):
+        if uri == "file://a.txt":
+            return SimpleNamespace(
+                contents=[
+                    SimpleNamespace(uri=uri, mimeType="text/plain", text="hello from the resource")
+                ]
+            )
+        if uri == "file://multi.txt":
+            return SimpleNamespace(
+                contents=[
+                    SimpleNamespace(uri=uri, text="part one"),
+                    SimpleNamespace(uri=uri, text="part two"),
+                ]
+            )
+        if uri == "file://logo.png":
+            return SimpleNamespace(
+                contents=[SimpleNamespace(uri=uri, mimeType="image/png", blob="QUJD")]
+            )
+        return SimpleNamespace(contents=[])
+
+
+async def test_mcp_resource_body_comes_from_contents_not_content():
+    """An MCP *resource read* body rides `contents[]` (`ReadResourceResult`), not the `content[]`
+    of a tool-call result. `load_mcp_resources` fed the read result to the tool-result extractor,
+    which matched neither key and fell through to `str(result)` — so it was never parsed."""
+    resources = await load_mcp_resources(FakeMCPResourceSession())
+    assert resources["file://a.txt"] == "hello from the resource"
+    assert resources["file://multi.txt"] == "part one\npart two"  # every entry, joined
+    assert resources["file://logo.png"] == ""  # a blob has no text — never base64 in a prompt
+    assert resources["file://empty"] == ""
+    assert "namespace(" not in repr(resources)  # no un-parsed object leaked through as a string
 
 
 # --------------------------------------------------------------------------- A2A
@@ -251,6 +304,101 @@ def test_hitl_approval_recorded_in_audit_chain(build, tmp_path):
     assert oversight[0].payload["reviewer"] == "ops@bank"
     ok, detail = verify(str(tmp_path / "audit.jsonl"))
     assert ok, detail
+
+
+_policy_lookups: list = []
+
+
+@tool
+async def fetch_policy(topic: str) -> str:
+    """Look up a policy (async — the shape every MCP-backed tool has)."""
+    _policy_lookups.append(topic)
+    return f"Policy for {topic}: 30 days."
+
+
+async def test_hitl_approval_runs_an_async_tool_in_an_async_run(build):
+    """An **async** tool under `require_approval` must run in `run.aio`.
+
+    `require_approval` wrapped the tool in a *sync* wrapper that resolved the coroutine with
+    `_resolve_sync`, which raises inside a running event loop — so an async tool (typically an MCP
+    tool) under approval returned `[error] RuntimeError` instead of running.
+    """
+    _policy_lookups.clear()
+    approvals: list = []
+
+    def approver(name, args):
+        approvals.append((name, args))
+        return True, "within policy"
+
+    guarded = require_approval(fetch_policy, approver=approver, reviewer="ops@bank")
+    agent = Agent(name="support", model="gpt-4o", tools=[guarded], instructions="Use tools.")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(
+            side_effect=[
+                build.resp(
+                    build.openai_chat(
+                        None,
+                        finish="tool_calls",
+                        tool_calls=[build.openai_tool_call("fetch_policy", {"topic": "refunds"})],
+                    )
+                ),
+                build.resp(build.openai_chat("Refunds take 30 days.")),
+            ]
+        )
+        result = await run.aio(agent, "How long do refunds take?")
+
+    assert approvals == [("fetch_policy", {"topic": "refunds"})]
+    assert _policy_lookups == ["refunds"]  # the approved async tool actually ran
+    assert result.tool_steps[0].call.result == "Policy for refunds: 30 days."
+    assert result.output == "Refunds take 30 days."
+
+
+def test_hitl_approval_runs_an_async_tool_in_a_sync_run(build):
+    """The sync path keeps working: an async tool under approval still resolves in `run()`."""
+    _policy_lookups.clear()
+    guarded = require_approval(fetch_policy, approver=always_approve)
+    agent = Agent(name="support", model="gpt-4o", tools=[guarded], instructions="Use tools.")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(
+            side_effect=[
+                build.resp(
+                    build.openai_chat(
+                        None,
+                        finish="tool_calls",
+                        tool_calls=[build.openai_tool_call("fetch_policy", {"topic": "returns"})],
+                    )
+                ),
+                build.resp(build.openai_chat("Returns take 30 days.")),
+            ]
+        )
+        result = run(agent, "How long do returns take?")
+
+    assert _policy_lookups == ["returns"]
+    assert result.tool_steps[0].call.result == "Policy for returns: 30 days."
+
+
+async def test_hitl_rejection_blocks_an_async_tool_in_an_async_run(build):
+    """Rejection still short-circuits an async tool — the denial reaches the model, not an error."""
+    _policy_lookups.clear()
+    guarded = require_approval(fetch_policy, approver=always_reject)
+    agent = Agent(name="support", model="gpt-4o", tools=[guarded], instructions="Use tools.")
+    with respx.mock:
+        respx.post(build.CHAT_URL).mock(
+            side_effect=[
+                build.resp(
+                    build.openai_chat(
+                        None,
+                        finish="tool_calls",
+                        tool_calls=[build.openai_tool_call("fetch_policy", {"topic": "refunds"})],
+                    )
+                ),
+                build.resp(build.openai_chat("I can't look that up right now.")),
+            ]
+        )
+        result = await run.aio(agent, "How long do refunds take?")
+
+    assert _policy_lookups == []  # rejected -> the real coroutine was never created
+    assert "[denied]" in result.tool_steps[0].call.result
 
 
 def test_hitl_rejection_blocks_the_tool(build, tmp_path):

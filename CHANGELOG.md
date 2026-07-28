@@ -4,6 +4,65 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+Four fixes found by the external black-box suite driving the *published* packages against live
+provider APIs. Every one is reproduced and pinned offline (no network, mocked/fake clients).
+
+### `Agent(output_type=…)` works on Gemini (was broken outright)
+
+google-genai's `types.Schema` **accepts** `additionalProperties` — it declares an
+`additional_properties` field, and `_transformers.process_schema` folds one spelling into the other —
+so nothing failed locally; the key was forwarded and the Gemini Developer API 400s on it.
+`_schema_from_output_type` stamps `additionalProperties: False` on every dataclass object node, so
+structured output did not work on Gemini at all.
+
+`config.response_schema` now goes through the **same** `_gemini_sanitize` a tool declaration already
+used (one sanitizer, so the two can't drift), extended to drop google-genai's snake_case
+`additional_properties` as well. Recursive: root, nested models, items of a list of models, and an
+optional model. `$defs`/`$ref` are deliberately left alone — google-genai inlines them, and dropping
+half the pair would break a nested model's schema.
+
+### A cross-provider handoff into a Gemini 3 agent no longer 400s on a missing `thought_signature`
+
+Gemini 3.x rejects a replayed `function_call` that carries no `thought_signature`. A handoff replays
+the *supervisor's* history into the receiving agent — a non-Gemini supervisor's `transfer_to_*` call,
+plus any real tool it called first — and none of those ever had a signature, so the receiving Gemini
+agent could not make its first call.
+
+**Nothing is fabricated.** A thought signature is an opaque token Google issues over **Gemini's own**
+reasoning for that context; minting one would misrepresent provenance and would be rejected as
+invalid anyway. Instead the foreign turn is re-emitted as a text part stating the call, and its
+matching `function_response` follows as text — the same information in a shape the API always accepts.
+
+Scope is deliberately narrow, so Gemini's own tool loops are unchanged: only for families that
+validate signatures (`gemini-3` and later — 2.x and 1.5 never did, and their payload is byte-identical
+to before), and only for a model turn where **not one** function-call part carries a signature. A turn
+with at least one signature came from Gemini itself (a parallel-call turn signs only the first part)
+and is replayed verbatim, signature included.
+
+### `require_approval` can run an **async** tool in an async run
+
+Human-in-the-loop approval wrapped the tool in a *sync* wrapper that resolved the coroutine with
+`_resolve_sync`, which raises inside a running event loop — so an async tool (typically an MCP tool)
+under `require_approval` returned
+`[error] RuntimeError: an async tool was invoked from a synchronous run inside a running event loop`
+instead of running, in both `run.aio` and `run.astream`.
+
+The wrapper now matches the wrapped tool's sync/async-ness, and the returned `Tool` reports the right
+`is_async`. The sync path is unchanged, including a sync-declared tool that returns an awaitable, and
+a rejection still short-circuits before the coroutine is ever created. Public API is identical.
+
+### `load_mcp_resources` returns the resource body
+
+An MCP *resource read* body rides `contents[].text` (`ReadResourceResult`), not the `content[].text`
+of a tool-call result. The loader fed the read result to the tool-result extractor, which recognized
+neither key and fell through to `str(result)` — so the caller got the object's `repr`, not the
+resource. Resource reads now have their own extractor: every text entry joined with `\n`, `''` for an
+empty `contents`, a blob contributes nothing (the contract is the resource's *text*; base64 bytes are
+not text to hand a model), and any other shape still falls back to the tool-result extractor so a
+non-spec server behaves exactly as before. Ported from the same fix in `@cendor/sdk`.
+
 ## [1.20.0] — 2026-07-26
 **An agent can have an identity, not just a name — and every governance row says which agent it was.**
 

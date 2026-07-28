@@ -42,6 +42,34 @@ def _mcp_result_text(result: Any) -> str:
     return "\n".join(parts) if parts else str(content)
 
 
+def _mcp_resource_text(result: Any) -> str:
+    """Extract text from an MCP ``ReadResourceResult`` — the body rides ``.contents``, not the
+    ``.content`` of a tool-call result.
+
+    Feeding a resource read to :func:`_mcp_result_text` matched neither key and fell through to
+    ``str(result)``, so the resource was never parsed (the whole object was handed to the caller as
+    its ``repr``).
+
+    ``contents`` is a list of ``TextResourceContents`` (``.text``) or ``BlobResourceContents``
+    (``.blob``, base64): every text entry is joined with ``\\n`` (so a multi-part resource keeps all
+    of it), an empty list is ``""``, and a blob contributes nothing — this function's contract is
+    the resource's *text*, and base64 bytes are not text to hand a model. Any other shape falls back
+    to the tool-result extractor, so a non-spec server behaves exactly as before.
+    """
+    contents = _get(result, "contents")
+    if not isinstance(contents, list):
+        return _mcp_result_text(result)
+    parts: list[str] = []
+    for item in contents:
+        if isinstance(item, str):
+            parts.append(item)
+            continue
+        text = _get(item, "text")
+        if text is not None:
+            parts.append(str(text))
+    return "\n".join(parts)
+
+
 def _wrap_mcp_tool(session: Any, spec: Any, server: str = "", transport: str = "") -> Tool:
     name = _get(spec, "name") or "tool"
     description = _get(spec, "description") or ""
@@ -139,7 +167,7 @@ async def load_mcp_resources(session: Any) -> dict[str, Any]:
             continue
         try:
             contents = await session.read_resource(uri)
-            out[str(uri)] = _mcp_result_text(contents)
+            out[str(uri)] = _mcp_resource_text(contents)
         except Exception:  # noqa: BLE001 - a single unreadable resource must not abort the batch
             continue
     return out

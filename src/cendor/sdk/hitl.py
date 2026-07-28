@@ -10,6 +10,7 @@ reviewer (a prompt, a queue, a webhook); here it is a plain callable so it stays
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
 from typing import Any
 
@@ -46,8 +47,9 @@ def require_approval(
     """
     inner = as_tool(tool)
 
-    def guarded(**kwargs: Any) -> Any:
-        approved, note = _verdict(approver(inner.name, dict(kwargs)))
+    def _review(kwargs: dict) -> str | None:
+        """Consult the approver and record the verdict: the denial string, or ``None`` to run."""
+        approved, note = _verdict(approver(inner.name, kwargs))
         decision = _active_decision.get()
         if decision is not None:
             try:
@@ -58,20 +60,38 @@ def require_approval(
                 )
             except Exception:  # noqa: BLE001 - oversight recording is best-effort
                 pass
-        if not approved:
-            return f"[denied] human oversight rejected '{inner.name}'" + (
-                f": {note}" if note else ""
-            )
-        # Call the raw function (the guarded wrapper is itself instrumented, so one ToolCall is
-        # emitted — not two). Resolve an async tool's coroutine from this sync path.
+        if approved:
+            return None
+        return f"[denied] human oversight rejected '{inner.name}'" + (f": {note}" if note else "")
+
+    # The wrapper must match the wrapped tool's sync/async-ness. A single *sync* wrapper resolved an
+    # async tool's coroutine with `_resolve_sync`, which raises inside a running event loop — so an
+    # async tool (typically an MCP tool) under approval returned `[error] RuntimeError` in `run.aio`
+    # / `run.astream` instead of running. Both wrappers call the raw function (the wrapper itself is
+    # instrumented, so exactly one ToolCall is emitted — not two).
+
+    async def guarded_async(**kwargs: Any) -> Any:
+        denial = _review(dict(kwargs))
+        if denial is not None:
+            return denial  # rejected: the coroutine is never created, so nothing to await
+        result = inner.func(**kwargs)
+        return await result if inspect.isawaitable(result) else result
+
+    def guarded_sync(**kwargs: Any) -> Any:
+        denial = _review(dict(kwargs))
+        if denial is not None:
+            return denial
+        # Still resolve here: a *sync-declared* tool may return an awaitable (an async def behind a
+        # decorator), and `run()` has no loop to await it on.
         return _resolve_sync(inner.func(**kwargs))
 
+    is_async = inner.is_async or inspect.iscoroutinefunction(inner.func)
     return Tool(
         name=inner.name,
         description=inner.description,
         parameters=inner.parameters,
-        func=guarded,
-        is_async=False,
+        func=guarded_async if is_async else guarded_sync,
+        is_async=is_async,
     )
 
 
