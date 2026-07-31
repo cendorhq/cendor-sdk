@@ -14,6 +14,80 @@ from typing import Any
 from cendor.core.types import LLMCall, Money, ToolCall, Usage, sum_usage
 from cendor.guardrails import GuardrailDecision
 
+#: The marker the loop puts in front of a failed tool's result before handing it to the model.
+#: The string the MODEL sees is a deliberate contract (it is how the model learns to recover) and is
+#: never changed — this constant just gives the one place that defines it a name.
+TOOL_ERROR_PREFIX = "[error] "
+
+
+def is_tool_error(result: object) -> bool:
+    """Whether a tool result is the loop's own failure marker.
+
+    The single definition of "this tool failed", shared by :attr:`Result.tool_errors` and the
+    ``cendor.tool.outcome`` span attribute (``otel._tool_outcome``) so the two can never disagree.
+
+    Honest limit: a tool whose *own* output begins with ``"[error] "`` is indistinguishable from a
+    failure. That is not new — the span attribute has classified on this prefix since it shipped —
+    and it is why the marker is a constant here rather than a literal in two files.
+    """
+    return isinstance(result, str) and result.startswith(TOOL_ERROR_PREFIX)
+
+
+@dataclass(frozen=True)
+class ToolError:
+    """One tool execution that raised, in structured form.
+
+    ``run()`` keeps the loop alive when a tool raises: the exception is turned into a
+    ``"[error] <Type>: <message>"`` string, handed to the model, and the conversation continues.
+    That
+    is the right behaviour — but it left the *caller* with nothing to branch on except string
+    matching. This is that failure, typed.
+
+    ```python
+    result = run(agent, "refund order 42")
+    if result.tool_failed:
+        for err in result.tool_errors:
+            log.warning("tool %s raised %s: %s", err.tool, err.type, err.message)
+    ```
+    """
+
+    tool: str
+    """The tool that raised — or the name the model asked for, when no such tool exists."""
+
+    type: str
+    """The exception class name (``"ValueError"``), or ``"UnknownTool"`` when the model named a tool
+    the agent does not have."""
+
+    message: str
+    """The exception's message, exactly as the model was shown it."""
+
+    tool_call_id: str = ""
+    """The provider's id for the call this failure answers, for correlation with the assistant turn
+    that requested it. Empty only if the provider omitted one."""
+
+
+_UNKNOWN_TOOL_MARKER = "unknown tool: "
+
+
+def _parse_tool_error(content: str, tool: str, tool_call_id: str) -> ToolError:
+    """Split the loop's own marker string back into its parts.
+
+    Safe because this parses a string *this package wrote* two functions earlier
+    (``runner._exec_tool_sync``: ``f"[error] {type(e).__name__}: {e}"``), not provider text.
+    """
+    body = content[len(TOOL_ERROR_PREFIX) :]
+    if body.startswith(_UNKNOWN_TOOL_MARKER):
+        return ToolError(
+            tool=body[len(_UNKNOWN_TOOL_MARKER) :].strip() or tool,
+            type="UnknownTool",
+            message=body,
+            tool_call_id=tool_call_id,
+        )
+    kind, sep, msg = body.partition(": ")
+    if not sep:  # no separator — keep the whole body as the message rather than inventing a type
+        return ToolError(tool=tool, type="", message=body, tool_call_id=tool_call_id)
+    return ToolError(tool=tool, type=kind, message=msg, tool_call_id=tool_call_id)
+
 
 @dataclass
 class Step:
@@ -91,6 +165,48 @@ class Result:
     def tool_steps(self) -> list[Step]:
         """The tool executions."""
         return [s for s in self.steps if s.kind == "tool"]
+
+    @property
+    def tool_errors(self) -> list[ToolError]:
+        """Every tool execution that raised during this run, typed, in order.
+
+        A raising tool does not stop the run — the loop hands the model
+        ``"[error] <Type>: <message>"`` and keeps going — and it emits **no** ``ToolCall`` on the
+        bus
+        (core's tool wrapper does not catch), so a failed tool appears in neither :attr:`steps` nor
+        :attr:`tool_steps`. Before this property the only machine-readable trace of a failure
+        was that string prefix inside :attr:`messages`, which callers had to match by hand.
+
+        Derived from :attr:`messages` rather than recorded separately, deliberately: the messages
+        are what the model actually saw and what a checkpoint persists, so a **resumed** run
+        reports its earlier tool failures too, and there is no second copy of the truth to drift.
+
+        See :func:`is_tool_error` for the one honest limit.
+
+        ```python
+        result = run(agent, "refund order 42")
+        assert not result.tool_failed          # or inspect result.tool_errors
+        ```
+        """
+        errors: list[ToolError] = []
+        for m in self.messages:
+            if m.get("role") != "tool":
+                continue
+            content = m.get("content")
+            if not is_tool_error(content):
+                continue
+            errors.append(
+                _parse_tool_error(
+                    str(content), str(m.get("name") or ""), str(m.get("tool_call_id") or "")
+                )
+            )
+        return errors
+
+    @property
+    def tool_failed(self) -> bool:
+        """True if any tool raised during the run. A guardrail *block* is not a failure — it is a
+        decision, and lands in :attr:`guardrail_decisions` instead."""
+        return bool(self.tool_errors)
 
     @property
     def final_message(self) -> dict | None:

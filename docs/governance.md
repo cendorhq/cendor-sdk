@@ -203,8 +203,13 @@ bare instrumented client, and in both languages:
 
 - **`on_exceed="raise"` overshoots by one call** — it's post-flight. For a true ceiling use
   `"block"` (details in [tokenguard → honest limits](/docs/tokenguard#honest-limits)).
-- **Unpriced models record `$0`,** so a USD cap can't bind on them — register a rate or use a
-  token cap ([Providers → pricing custom models](providers.md#pricing-unpriced-models)).
+- **Unpriced models record `$0`,** so a USD cap can't bind on them. Three remedies, and the third
+  is the one to reach for when a silent `$0` is unacceptable: register a rate, use a `tokens=` cap
+  (tokens are counted whether or not the model is priced), or **fail closed** with
+  `configure(on_unpriced="raise")` — then `on_exceed="block"` rejects an unpriced call pre-flight
+  instead of letting it through at `$0`. The default is `"warn"` (one
+  `UnpricedModelWarning` per model, the call proceeds), so a budget that must never be bypassed has
+  to opt in ([Providers → pricing unpriced models](providers.md#pricing-unpriced-models)).
 - **`guard` redacts what its detectors find.** Regex/pattern detectors plus (Python-only)
   Presidio NER — see [acttrace](/docs/acttrace) for coverage and the
   [parity matrix](/docs/languages) for the language split.

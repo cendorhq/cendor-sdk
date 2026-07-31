@@ -7,11 +7,48 @@ the saved messages and are not re-executed). Local by default; no server.
 
 from __future__ import annotations
 
+import errno
 import json
+import time
 from pathlib import Path
 from typing import Any
 
 from . import _telemetry as _tel
+
+#: Errnos a replace can fail with *transiently* because someone else holds the destination open.
+#: Anything else (ENOENT, ENOSPC, EROFS, …) is a real failure and must propagate on the first try.
+_SHARING_VIOLATION = frozenset({errno.EACCES, errno.EPERM, errno.EBUSY})
+
+_REPLACE_RETRIES = 5
+_REPLACE_BASE_S = 0.002  # 5 retries at 2ms doubling — a hard ceiling of 62ms, then the real error.
+
+
+def _atomic_replace(tmp: Path, target: Path) -> None:
+    """Replace ``target`` with ``tmp``, retrying a transient sharing violation.
+
+    ``Path.replace`` is ``MoveFileExW(MOVEFILE_REPLACE_EXISTING)`` on Windows, which needs exclusive
+    access to the DESTINATION. It overwrites correctly, but raises ``PermissionError``
+    (errno 13 / winerror 5) whenever another process has a handle open on that path — and a file
+    just created is exactly what Defender and the Search indexer open. Measured on Windows 11 /
+    CPython 3.13: **8 of 500** replaces over an existing file failed, and it is deterministic while
+    a handle is held. The holder releases in microseconds, so a small bounded retry clears it.
+
+    (The TypeScript twin had the same defect from the same syscall; both were fixed together. POSIX
+    ``rename`` has no sharing-violation concept, so this is a no-op there.)
+
+    Deliberately NOT ``unlink`` then ``replace``: that also clears the violation but opens a window
+    where a crash leaves no checkpoint at all, destroying the previous good state — the very failure
+    the temp file exists to prevent.
+    """
+    for attempt in range(_REPLACE_RETRIES + 1):
+        try:
+            tmp.replace(target)
+            return
+        except OSError as exc:
+            if attempt >= _REPLACE_RETRIES or exc.errno not in _SHARING_VIOLATION:
+                tmp.unlink(missing_ok=True)  # don't leave a stale .tmp; load() only reads target
+                raise
+            time.sleep(_REPLACE_BASE_S * 2**attempt)
 
 
 class Checkpointer:
@@ -42,11 +79,15 @@ class Checkpointer:
             return None
 
     def save(self, state: dict[str, Any]) -> None:
-        """Atomically write the run state (temp file + replace)."""
+        """Atomically write the run state (temp file + replace).
+
+        The replace retries a transient Windows sharing violation — see :func:`_atomic_replace`. A
+        permanent error (a full disk, a read-only path) still raises on the first attempt.
+        """
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(self.path.suffix + ".tmp")
         tmp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
-        tmp.replace(self.path)
+        _atomic_replace(tmp, self.path)
         # E-wave: checkpoint.save span (correlated by the run id carried in the state itself).
         _tel.emit_checkpoint(
             "save",

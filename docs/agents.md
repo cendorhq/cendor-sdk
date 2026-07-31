@@ -194,6 +194,8 @@ result.cost          # aggregate Money (Decimal) across the run
 result.trace_id      # the run id every step shares
 result.messages      # the full conversation (canonical/OpenAI-shape messages)
 result.incomplete    # True when the run ended without a final answer
+result.tool_failed   # True if any tool raised during the run
+result.tool_errors   # list[ToolError] — .tool, .type, .message, .tool_call_id
 ```
 
 <!-- tab: TypeScript -->
@@ -208,12 +210,61 @@ result.cost          // aggregate Money (decimal) across the run
 result.traceId       // the run id every step shares
 result.messages      // the full conversation (canonical/OpenAI-shape messages)
 result.incomplete    // true when the run ended without a final answer
+result.toolFailed    // true if any tool threw during the run
+result.toolErrors    // ToolError[] — .tool, .type, .message, .toolCallId
 ```
 
 <!-- /tabs -->
 
 Each `Step` wraps the actual `LLMCall`/`ToolCall` from the bus (`.call`), with `.agent`, `.kind`
 (`"llm"`/`"tool"`), and `.name` (model id or tool name).
+
+#### When a tool fails
+
+A tool that raises does **not** end the run. The loop turns the exception into
+`"[error] <Type>: <message>"`, hands that to the model, and continues — which is what lets a model
+apologise, retry with different arguments, or route around the failure. That string is a contract with
+the model and never changes.
+
+What it used to cost the *caller* was any way to notice. Read `tool_errors` instead of matching text:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+result = run(agent, "refund order 42")
+
+if result.tool_failed:
+    for err in result.tool_errors:
+        print(err.tool, err.type, err.message)   # "refund" "TimeoutError" "upstream took 30s"
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+const result = await run(agent, 'refund order 42');
+
+if (result.toolFailed) {
+  for (const err of result.toolErrors) {
+    console.log(err.tool, err.type, err.message); // "refund" "TimeoutError" "upstream took 30s"
+  }
+}
+```
+
+<!-- /tabs -->
+
+`type` is the exception/error class name, or `"UnknownTool"` when the model asked for a tool the agent
+doesn't have. A guardrail **block** is not a tool failure — it is a decision, and appears in
+`guardrail_decisions` / `guardrailDecisions` instead.
+
+Two things worth knowing, both measured:
+
+- **A failed tool produces no `Step`.** `cendor-core` emits a `ToolCall` when a tool *returns*, not
+  when it raises, so a failure appears in neither `steps` nor `tool_steps`, and no `execute_tool` span
+  is rendered for it. `tool_errors` is the surface that sees those; `tool_steps` still counts only
+  successful executions.
+- **`incomplete` stays `False`.** A run whose tools all failed but which produced a final answer is a
+  *complete* run. Check `tool_failed` as well as `incomplete` if a failed tool should fail your job.
 
 ### Structured output
 
@@ -434,6 +485,11 @@ Python's equivalents differ — e.g. Python has no in-memory session *store*, ju
 
 - **The loop is bounded, not clever.** `max_turns` is the only termination guarantee; a model
   that never answers finishes `incomplete`, it doesn't error.
+- **A tool that raises is reported, not raised.** The exception reaches the model as
+  `"[error] …"` and the run continues; the caller reads
+  [`result.tool_errors`](#when-a-tool-fails). Two honest edges: a failed tool emits no `ToolCall`, so
+  it is absent from `tool_steps` and from the span tree; and a tool whose *own* output starts with
+  `"[error] "` is indistinguishable from one that failed.
 - **Token-level streaming is the OpenAI Chat family, Anthropic, and Ollama** (plus Hugging Face,
   Azure AI Foundry, and Foundry Local, which ride the OpenAI Chat client). OpenAI Responses, Gemini,
   and Bedrock fall back to a non-streamed call and yield one whole-response delta — same events,

@@ -278,9 +278,19 @@ def _tool_source_attrs(name: str) -> dict[str, Any]:
 def _tool_outcome(call: Any) -> str:
     """Derive a tool call's outcome (``ok`` | ``error``) from the runner's own result convention —
     a failed tool returns ``"[error] …"`` (runner._exec_tool_*). Computed in-process from the
-    result value; only the ``ok``/``error`` LABEL lands on the span, never the result text."""
-    result = getattr(call, "result", None)
-    return "error" if isinstance(result, str) and result.startswith("[error]") else "ok"
+    result value; only the ``ok``/``error`` LABEL lands on the span, never the result text.
+
+    Classifies through :func:`result.is_tool_error`, the single definition shared with
+    ``Result.tool_errors`` — the two cannot disagree about what a tool failure is.
+
+    ⚠️ Measured 2026-07-31 (GAPCLOSE S7): this can currently only fire for a tool that *returns* the
+    marker or replays one, because a tool that RAISES emits no ``ToolCall`` at all, so no
+    ``execute_tool`` span is rendered for it. ``Result.tool_errors`` is the surface that sees those;
+    closing the span-side gap needs core to emit on failure and is deliberately not done here.
+    """
+    from .result import is_tool_error
+
+    return "error" if is_tool_error(getattr(call, "result", None)) else "ok"
 
 
 # --- E-wave domain spans (RAG / memory / orchestration / checkpoints / blocked tools) ------------

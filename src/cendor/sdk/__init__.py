@@ -96,7 +96,7 @@ from .orchestration import (
     supervisor,
 )
 from .otel import live_spans, span_tree
-from .pricing import register_model_price
+from .pricing import register_deployment, register_model_price
 from .providers import MissingAPIKeyError, ParsedResponse, ToolInvocation
 from .rag import Hit, VectorIndex
 from .resilience import RetryPolicy
@@ -108,6 +108,7 @@ from .result import (
     TextDelta,
     ThinkingDelta,
     ToolCallEvent,
+    ToolError,
     ToolResultEvent,
 )
 from .result import Run as Run
@@ -176,17 +177,20 @@ __all__ = [
     "TextDelta",
     "ThinkingDelta",
     "ToolCallEvent",
+    "ToolError",
     "ToolResultEvent",
     "RunComplete",
     # governance (the identical tokenguard/acttrace objects, re-exported — incl. `guard`, whose
-    # dual-shape return since acttrace 1.5.0 makes the scope form a library feature;
-    # `register_model_price` is SDK-owned)
+    # dual-shape return since acttrace 1.5.0 makes the scope form a library feature.
+    # `register_model_price` / `register_deployment` are thin re-exports of cendor.core.prices —
+    # public there since core 1.15.0, so a libraries-door user needs no SDK distribution)
     "budget",
     "track",
     "report",
     "configure",
     "downgrades",
     "clamps",
+    "register_deployment",
     "register_model_price",
     "BudgetExceeded",
     "BudgetEvent",

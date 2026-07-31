@@ -200,7 +200,33 @@ const picky = new Agent({ name: 'p', model: 'gpt-4o', tools: [/* ... */],
 
 Model ids absent from the bundled price table (Hub ids, deployment names, custom gateways) cost
 `$0`, so a USD [`budget(...)`](governance.md#budgets) can't bind. Register a rate and cost +
-budgets work:
+budgets work.
+
+**For an Azure/Foundry deployment, you usually don't need the rate card** — you know which model the
+deployment serves, and that is enough:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import register_deployment
+
+register_deployment("prod-gpt4o-eastus", like="gpt-4o")   # priced like gpt-4o from here on
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { registerDeployment } from '@cendor/sdk';
+
+registerDeployment('prod-gpt4o-eastus', { like: 'gpt-4o' }); // priced like gpt-4o from here on
+```
+
+<!-- /tabs -->
+
+It copies `like`'s rates at registration and survives a `prices.refresh()`; an unknown `like` raises
+rather than leaving the deployment quietly unpriced. Nothing is inferred from the deployment's name —
+Cendor never guesses a price from an id's shape. When you *do* have the rate card:
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -227,8 +253,45 @@ await withBudget({ usd: 0.10, onExceed: 'block' }, () =>
 
 `register_model_price` and `configure(on_unpriced=…)` are [tokenguard](/docs/tokenguard)'s price
 table, re-exported through the SDK — the same rates that price every `Result.cost` and bind every
-`budget()`. Or use a `tokens=` cap (tokens are counted regardless of price), or
-`configure(on_unpriced="raise")` to reject unpriced calls outright.
+`budget()`. Or use a `tokens=` cap: tokens are counted whether or not the model is priced, so a
+token cap binds on a deployment name that a USD cap cannot.
+
+#### Fail closed instead of costing `$0`
+
+The default is `on_unpriced="warn"` — one `UnpricedModelWarning` per model, and **the call
+proceeds**. That is the right default for exploration and the wrong one for a hard spend ceiling: a
+typo in a deployment name silently prices at `$0`, and a USD cap never bites. Switch it once, at
+startup, and `on_exceed="block"` refuses what it cannot price:
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from cendor.sdk import configure, budget, run
+
+configure(on_unpriced="raise")  # a USD cap now refuses an unpriced model instead of billing $0
+
+with budget(usd=0.10, on_exceed="block"):
+    run(agent, "...")           # raises BudgetExceeded pre-flight if the model has no price
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { configure, withBudget, run } from '@cendor/sdk';
+
+configure({ onUnpriced: 'raise' }); // a USD cap now refuses an unpriced model instead of billing $0
+
+await withBudget({ usd: 0.1, onExceed: 'block' }, () =>
+  run(agent, '...'));              // rejects pre-flight if the model has no price
+```
+
+<!-- /tabs -->
+
+Either way the unpriced calls are still counted: `report()` (re-exported by the SDK) flags them
+per row, and [tokenguard](/docs/tokenguard)'s own `unpriced_calls()` / `unpricedCalls()` returns the
+total — so `"warn"` is observable rather than invisible. `"raise"` only changes what a **USD** cap
+does; a `tokens=` cap is unaffected, because token counting never needed a price.
 
 ## Hugging Face
 

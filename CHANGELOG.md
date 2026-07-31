@@ -4,6 +4,82 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] — 2026-07-31
+
+GAPCLOSE Train 1 — a typed way to see a tool failure, a deployment-pricing re-export, and a Windows
+checkpoint defect that had been mistaken for a test flake.
+
+### `result.tool_errors` — a tool failure you can branch on
+
+A tool that raises does not end a run: the loop turns the exception into `"[error] <Type>: <message>"`,
+hands that to the model, and continues — which is what lets a model apologise, retry with different
+arguments, or route around the failure. That string is a contract with the model and is **unchanged**
+(asserted byte-for-byte, because a "fix" that altered it would silently change how every model recovers
+from a tool failure).
+
+What it cost the *caller* was any way to notice. Measured: a raising tool emits **zero** `ToolCall`
+events on the bus (`cendor-core` does not catch around the tool), so it appears in neither
+`result.steps` nor `result.tool_steps`, **no `execute_tool` span is rendered for it**, and
+`result.incomplete` stays `False` — the run "succeeded". The only machine-readable trace was the
+`"[error] "` prefix inside `result.messages`, which callers had to string-match by hand.
+
+```python
+result = run(agent, "refund order 42")
+if result.tool_failed:
+    for err in result.tool_errors:          # ToolError(tool, type, message, tool_call_id)
+        log.warning("tool %s raised %s: %s", err.tool, err.type, err.message)
+```
+
+`type` is the exception class name, or `"UnknownTool"` when the model asked for a tool the agent does
+not have. A guardrail **block** is not a tool failure — it is a decision, and stays in
+`result.guardrail_decisions`. `ToolError` is exported from `cendor.sdk`.
+
+Derived from `messages` rather than recorded separately, deliberately: the messages are what the model
+actually saw and what a checkpoint persists, so a **resumed** run reports its earlier tool failures too,
+and there is no second copy of the truth to drift. `otel._tool_outcome` (the `cendor.tool.outcome` span
+attribute) now classifies through the same shared `is_tool_error` predicate, so the span label and this
+view cannot disagree about what a tool failure is. Honest limit: a tool whose *own* output begins with
+`"[error] "` is indistinguishable from one that failed — already true of the span attribute, now stated.
+
+### `register_deployment` — price an Azure/Foundry deployment name
+
+`cendor.sdk.register_deployment("prod-gpt4o-eastus", like="gpt-4o")`, a thin re-export of
+`cendor.core.prices.register_deployment` (new in `cendor-core` 1.16.0). On Azure the id a call reports
+is the deployment name *you* chose, so it is in no price table and its cost is `None`; this maps it onto
+a base model's rates explicitly, rather than making you find and re-type a rate card. Copy-at-
+registration, survives `refresh()`, and an unknown `like` raises rather than leaving the deployment
+quietly unpriced.
+
+`cendor.sdk.pricing`'s module docstring also stops claiming there is "no `cendor.core.prices.register`
+to call directly" — that became false in `cendor-core` 1.15.0, and a libraries-door user has needed no
+SDK distribution for pricing since.
+
+### Fixed — `Checkpointer.save()` on Windows
+
+`save()` could raise `PermissionError` (errno 13 / winerror 5) and lose the turn. It had been recorded
+as a test flake; it is a real defect, and the mechanism is not the one the report assumed.
+
+`Path.replace` is `MoveFileExW(MOVEFILE_REPLACE_EXISTING)`, which needs exclusive access to the
+**destination**. It overwrites correctly — the folk explanation "rename over an existing file is
+non-atomic on Win32" is wrong — but it fails whenever any other process holds a handle on that path,
+and a file just created is exactly what Defender and the Search indexer open. Measured on Windows 11 /
+CPython 3.13: **8 of 500** replaces over an existing file failed, deterministic while a handle is held.
+The holder releases in microseconds, so `save()` now retries a transient sharing violation with a
+bounded backoff (5 attempts, ≤62 ms total) and 500/500 succeed.
+
+Deliberately **not** `unlink` then `replace`: that also clears the violation (measured) but opens a
+window in which a crash leaves **no checkpoint at all**, destroying the previous good state — the very
+failure the temp file exists to prevent. A permanent error (a full disk, a read-only path) still raises
+on the first attempt, the previous checkpoint survives a failed save intact, and no stale `.tmp` is left
+behind. The analysis had recorded Python as unaffected and TypeScript as the only victim; measuring both
+showed the same syscall behind both, so `@cendor/sdk` 3.2.0 carries the identical fix.
+
+### Docs
+
+`governance.md`'s honest limits and `providers.md` now name `configure(on_unpriced="raise")` — the
+fail-closed remedy for the `$0` blind spot — with runnable samples in both languages, and `agents.md`
+documents `result.tool_errors` and the two measured edges around it.
+
 ## [1.21.0] — 2026-07-31
 
 Ships the four black-box fixes below, plus two Azure/Foundry defects found by **live** verification
