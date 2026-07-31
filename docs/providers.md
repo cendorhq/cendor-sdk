@@ -296,7 +296,17 @@ the Azure path reuses the `openai` peer you already have. Two rules:
 
 1. **`model` is your deployment name**, not the underlying model name (Azure keys on deployment).
 2. **`base_url` is the Foundry endpoint** — `/openai/v1/` is appended for you; also read from
-   `AZURE_OPENAI_ENDPOINT`. No `api-version` needed (the v1 GA API infers it).
+   `AZURE_OPENAI_ENDPOINT`. No `api-version` needed (the v1 GA API infers it). All three forms
+   work: the Azure OpenAI host (`https://<res>.openai.azure.com`), the Foundry services host
+   (`https://<res>.services.ai.azure.com`), and the **project endpoint** the portal shows
+   (`https://<res>.services.ai.azure.com/api/projects/<name>`).
+
+> **Reasoning-family deployments need `max_completion_tokens`, and you don't have to care.** A
+> `gpt-5`/`o*` deployment rejects `max_tokens` with
+> *"Unsupported parameter: 'max_tokens' … Use 'max_completion_tokens' instead."* Because the id a
+> call carries is your **deployment** name, no library can predict this from the model string — so
+> the SDK reads the provider's own message and re-issues the call once with the rename
+> (`cendor-sdk` ≥ 1.21.0 / `@cendor/sdk` ≥ 3.1.0). `Agent(max_tokens=…)` is the one knob either way.
 
 <!-- tabs: lang -->
 <!-- tab: Python -->
@@ -376,6 +386,66 @@ const result = await run(agent, 'Draft a one-line release note.');
 ```
 
 <!-- /tabs -->
+
+### With the Foundry SDK (`azure-ai-projects` / `@azure/ai-projects`)
+
+If your app already builds an `AIProjectClient`, hand its OpenAI client straight to the agent —
+`get_openai_client()` / `getOpenAIClient()` returns a **plain `OpenAI` client** pointed at
+`<endpoint>/openai/v1`, which is exactly the shape this provider builds and `cendor-core`'s
+`instrument()` detects. Nothing else changes: budgets, guardrails and the audit chain ride the same
+seams.
+
+<!-- tabs: lang -->
+<!-- tab: Python -->
+
+```python
+from azure.ai.projects import AIProjectClient
+from azure.identity import DefaultAzureCredential
+from cendor.sdk import Agent, run
+
+project = AIProjectClient(
+    endpoint="https://my-resource.services.ai.azure.com/api/projects/my-project",
+    credential=DefaultAzureCredential(),
+)
+agent = Agent(
+    name="foundry",
+    model="my-gpt4o-deployment",
+    provider="azure",
+    client=project.get_openai_client(),   # a plain openai.OpenAI on /openai/v1/
+)
+result = run(agent, "Draft a one-line release note.")
+```
+
+<!-- tab: TypeScript -->
+
+```ts
+import { AIProjectClient } from '@azure/ai-projects';
+import { DefaultAzureCredential } from '@azure/identity';
+import { Agent, run } from '@cendor/sdk';
+
+const project = new AIProjectClient(
+  'https://my-resource.services.ai.azure.com/api/projects/my-project',
+  new DefaultAzureCredential(),
+);
+const agent = new Agent({
+  name: 'foundry',
+  model: 'my-gpt4o-deployment',
+  provider: 'azure',
+  client: project.getOpenAIClient(),     // a plain OpenAI client on /openai/v1
+});
+const result = await run(agent, 'Draft a one-line release note.');
+```
+
+<!-- /tabs -->
+
+`azure-ai-projects` / `@azure/ai-projects` is **your** dependency, never Cendor's — the SDK has no
+opinion about how the client was built. One cross-language difference worth knowing: the Python
+package documents an `api_key=` override on `get_openai_client(...)`, while the JS package always
+overwrites `apiKey` with its Entra token provider, so on the JS side authentication goes through
+the credential you pass to the constructor.
+
+You can also use the Foundry SDK on the **libraries** door with no agent loop at all — see
+[Providers → Azure AI Foundry](/docs/providers#azure-ai-foundry-models-via-the-openai-sdk).
 
 For an OpenAI-family deployment (`gpt-*`, `o*`) you can drive the **Responses API** instead with
 `provider="azure_responses"` — same construction, Responses semantics. Keep `provider="azure"`

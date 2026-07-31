@@ -856,3 +856,26 @@ def test_register_model_price_survives_prices_refresh(monkeypatch):
         assert cost.amount == Decimal("1")  # the registration survived the table swap
     finally:
         prices._reset()
+
+
+def test_azure_foundry_base_url_project_endpoint():
+    """A Foundry **project** endpoint takes `/openai/v1/` too.
+
+    Measured live 2026-07-31: `<project>/openai/v1/` serves Chat Completions (it is exactly what
+    `AIProjectClient.get_openai_client()` builds), while the bare project endpoint — what this
+    function used to return — answers `400 Missing required query parameter: api-version`, an
+    error that reads like "go back to the legacy AzureOpenAI client" and is not. The portal shows
+    the project endpoint, so pasting it into `base_url=` is the obvious thing to do.
+    """
+    proj = "https://myres.services.ai.azure.com/api/projects/my-project"
+    assert _azure_foundry_base_url({"base_url": proj}) == proj + "/openai/v1/"
+    assert _azure_foundry_base_url({"base_url": proj + "/"}) == proj + "/openai/v1/"
+    # A sovereign/private Foundry host is matched on the PATH, not the host name.
+    other = "https://foundry.contoso-gov.example/api/projects/p1"
+    assert _azure_foundry_base_url({"base_url": other}) == other + "/openai/v1/"
+    # Negative controls: neither an already-routed project endpoint nor an unrelated path moves.
+    assert _azure_foundry_base_url({"base_url": proj + "/openai/v1"}) == proj + "/openai/v1/"
+    assert (
+        _azure_foundry_base_url({"base_url": "https://gw.example.com/v1"})
+        == "https://gw.example.com/v1/"
+    )

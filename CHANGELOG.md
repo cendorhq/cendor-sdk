@@ -4,7 +4,47 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## Unreleased
+## [1.21.0] — 2026-07-31
+
+Ships the four black-box fixes below, plus two Azure/Foundry defects found by **live** verification
+of the SDK door on 2026-07-31 — both invisible to the offline suite, because both need a real
+deployment to reproduce.
+
+### `Agent(max_tokens=…)` works on a reasoning-family Azure deployment
+
+A `gpt-5`/`o*` deployment answers a Chat Completions call carrying `max_tokens` with
+`400 Unsupported parameter: 'max_tokens' is not supported with this model. Use
+'max_completion_tokens' instead.` — so `provider="azure"` failed outright on the most common
+current Foundry deployment family (measured live, both languages).
+
+This **cannot** be solved the way `temperature` was (a model-name prefix list): on Azure the id a
+call carries is the *deployment* name the user chose, and `"my-chat"` says nothing about the model
+behind it. So the provider's own error message is the signal: when a failure names both the
+rejected parameter **and** its replacement, the call is re-issued **once** with the rename applied.
+Deliberately narrow — it fires only when the message names both sides, the old key is actually in
+the request, and the new key is not already set; it costs no retry attempt and no backoff; and a
+second failure reaches the caller. Every other error path is byte-identical to before. Same fix and
+same tests in `@cendor/sdk` (`callModel`).
+
+### A Foundry **project** endpoint is accepted as `base_url`
+
+`https://<res>.services.ai.azure.com/api/projects/<name>` — the value the portal shows, and the one
+`azure-ai-projects` is constructed with — now takes the `/openai/v1/` route like the two bare host
+forms. Measured: with the route it serves Chat Completions (it is exactly what
+`AIProjectClient.get_openai_client()` builds); without it, the bare endpoint answers
+`400 Missing required query parameter: api-version` — an error that reads like *"go back to the
+legacy AzureOpenAI client"* and is not. Matched on the **path**, so a sovereign/private Foundry host
+is covered too. Same fix in `@cendor/sdk`.
+
+### Docs: the Foundry SDK path, spelled out
+
+`docs/providers.md` gains a **With the Foundry SDK** subsection — `AIProjectClient` →
+`get_openai_client()` / `getOpenAIClient()` → `Agent(client=…)`, in both languages — verified live
+end-to-end. It records one honest cross-language difference: `azure-ai-projects` (Python) documents
+an `api_key=` override on `get_openai_client(...)`; `@azure/ai-projects` (JS) always overwrites
+`apiKey` with its Entra token provider, so there authentication goes through the constructor's
+credential.
+
 
 Four fixes found by the external black-box suite driving the *published* packages against live
 provider APIs. Every one is reproduced and pinned offline (no network, mocked/fake clients).

@@ -1621,6 +1621,11 @@ class HuggingFaceProvider(OpenAIChatProvider):
         return cls(**kwargs)
 
 
+#: A Foundry **project** endpoint's path: ``…/api/projects/<project-name>``. Matched on the path,
+#: not the host, so a private/sovereign Foundry host is covered too.
+_AZURE_PROJECT_PATH_RE = re.compile(r"/api/projects/[^/]+$")
+
+
 def _azure_foundry_base_url(config: dict) -> str | None:
     """Resolve (and normalize) the Azure AI Foundry OpenAI-v1 ``base_url``.
 
@@ -1628,6 +1633,13 @@ def _azure_foundry_base_url(config: dict) -> str | None:
     ``AZURE_AI_ENDPOINT`` env vars — a bare Foundry host (``https://<res>.openai.azure.com`` or
     ``https://<res>.services.ai.azure.com``) gets the ``/openai/v1/`` route appended. An endpoint
     that already carries a path (``/openai/v1`` or the legacy ``/models``) is left as-is.
+
+    A Foundry **project** endpoint (``https://<res>.services.ai.azure.com/api/projects/<name>``) —
+    the value the portal shows and the one `azure-ai-projects` is constructed with — also takes
+    ``/openai/v1/``. Measured live 2026-07-31: ``<project>/openai/v1/`` serves Chat Completions
+    (it is exactly what ``AIProjectClient.get_openai_client()`` builds), while the bare project
+    endpoint answers ``400 Missing required query parameter: api-version`` — an error that reads
+    like "go back to the legacy client" and is not.
     """
     raw = (
         config.get("base_url")
@@ -1643,6 +1655,8 @@ def _azure_foundry_base_url(config: dict) -> str | None:
     if raw.endswith((".openai.azure.com", ".services.ai.azure.com")) or (
         ".cognitiveservices.azure.com" in raw
     ):
+        return raw + "/openai/v1/"
+    if _AZURE_PROJECT_PATH_RE.search(raw):  # a Foundry project endpoint
         return raw + "/openai/v1/"
     return raw + "/"
 
