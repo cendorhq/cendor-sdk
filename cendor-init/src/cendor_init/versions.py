@@ -17,16 +17,16 @@ AS_OF = "2026-07-31"
 RELEASES_URL = "https://cendor.ai/releases.json"
 
 PYPI: dict[str, str] = {
-    "cendor-core": "1.15.0",
-    "cendor-tokenguard": "1.6.3",
-    "cendor-guardrails": "1.6.1",
+    "cendor-core": "1.16.0",
+    "cendor-tokenguard": "1.7.0",
+    "cendor-guardrails": "1.7.0",
     "cendor-contextkit": "1.0.3",
     "cendor-squeeze": "1.1.1",
     "cendor-cassette": "1.1.1",
     "cendor-acttrace": "1.14.0",
     "cendor-libs": "1.2.0",
     "cendor": "1.1.0",
-    "cendor-sdk": "1.21.0",
+    "cendor-sdk": "1.22.0",
     "cendor-mcp": "0.1.7",
     "cendor-init": "0.3.0",
 }
