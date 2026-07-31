@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.22.0"
+version = "1.22.1"
 description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"
@@ -22,7 +22,12 @@ classifiers = [
 # (loose >=1.x,<2 ranges so a user who installs cendor-sdk AND a library à la carte resolves to
 # one compatible set). NEVER vendor — one cendor.* subpackage per distribution (we ship cendor.sdk).
 dependencies = [
-  "cendor-core>=1.16,<2",        # public prices.register_deployment (1.16), re-exported below
+  # >=1.17 is a governance-correctness floor, not a feature one: the SDK installs a tokenguard
+  # budget AND a guardrails/acttrace gate on the same call, and before core 1.17.0 a Reroute
+  # ended the interceptor chain — so exactly one of them took effect and which one depended on
+  # registration order (measured: a clamp before a guard sent the PII to the provider
+  # unredacted). Also brings Anthropic messages.stream()/parse() capture.
+  "cendor-core>=1.17,<2",        # public prices.register_deployment (1.16), re-exported below
   "cendor-tokenguard>=1.6.3,<2", # on_exceed="break" pinned over a Gemini stream (1.6.3)
   "cendor-guardrails>=1.6,<2",   # rules.intent / custom_category / presets / policy_schema / azure harm-categories (1.4); decisions counter (1.6)
   "cendor-acttrace>=1.13,<2",     # the actor on every mirrored audit entry (1.13, S4)

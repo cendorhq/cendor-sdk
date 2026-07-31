@@ -4,6 +4,21 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.1] — 2026-07-31
+
+### Fixed
+- **Raised the `cendor-core` floor to `>=1.17` so the SDK's own governance composes.** This is a
+  correctness floor, not a feature one. The loop installs a `tokenguard` budget **and** a
+  guardrails/acttrace gate on the same call, and before core 1.17.0 a `Reroute` ended core's
+  interceptor chain — so the first library to rewrite a request silently skipped the other, and which
+  one you lost depended on registration order. Measured on the libraries door: a clamp registered
+  before a `guard()` fired the clamp and sent the PII to the provider **unredacted**; the reverse
+  order redacted and left the token cap **silently unbound**. Nothing in this package changed; the
+  floor is what guarantees the fix is present. Core 1.17.0 also captures Anthropic's
+  `messages.stream()` / `messages.parse()`, which previously emitted nothing at all, so an SDK run
+  over those helpers is now visible to budgets, audit and cassette too.
+
+
 ## [1.22.0] — 2026-07-31
 
 GAPCLOSE Train 1 — a typed way to see a tool failure, a deployment-pricing re-export, and a Windows
