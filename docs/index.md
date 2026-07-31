@@ -94,7 +94,7 @@ it's continuous, never a migration.
 | [Memory & sessions](memory.md) | `Session`, durable stores, summarization, fitting memory to the window. |
 | [Retrieval (RAG)](rag.md) | Governed embeddings, `VectorIndex`, always-on and agentic retrieval. |
 | [Multi-agent](multi-agent.md) | Handoff, supervisor, pipelines — one correlated, governed tree. |
-| [Providers](providers.md) | The ten provider paths, Hugging Face / Azure AI Foundry / Foundry Local setup, pricing custom models. |
+| [Providers](providers.md) | The ten provider paths, Hugging Face / Microsoft Foundry (formerly Azure AI Foundry) / Foundry Local setup, pricing custom models. |
 | [Ecosystem & interop](interop.md) | MCP tools, A2A, Foundry/Copilot, OpenTelemetry, human-in-the-loop. |
 | [Production hardening](hardening.md) | Retries, checkpointed/resumable runs, durable memory. |
 | [Eval & regression testing](eval.md) | Replay recorded trajectories as CI tests — behaviour *and* spend. |

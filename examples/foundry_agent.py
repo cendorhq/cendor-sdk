@@ -1,14 +1,16 @@
-"""Governed agents on **Azure AI Foundry** (cloud) and **Foundry Local** (on-device), OFFLINE.
+"""Governed agents on **Microsoft Foundry** (cloud) and **Foundry Local** (on-device), OFFLINE.
 
-Microsoft's current guidance (the ``AzureOpenAI`` client and ``azure-ai-inference`` are being
-retired) is to reach Foundry deployments with the **standard ``openai`` SDK** pointed at the
-Foundry ``/openai/v1/`` endpoint. cendor-sdk wraps that as ``provider="azure"`` — so the governed
-loop, budgets, audit, and redaction all ride the same seams as any other provider.
+Microsoft Foundry was formerly called Azure AI Foundry. Microsoft's guidance is to reach Foundry
+deployments with the **standard ``openai`` SDK** (not the legacy ``AzureOpenAI`` client) pointed at
+the Foundry ``/openai/v1/`` endpoint — ``azure-ai-inference`` (the Azure AI Inference beta SDK,
+the ``/models`` route) is deprecated and retires on 26 August 2026, per Microsoft's Foundry Models
+endpoints page. cendor-sdk wraps that as ``provider="azure"`` — so the governed loop, budgets,
+audit, and redaction all ride the same seams as any other provider.
 
 Everything here is real except the model call, which is a tiny OpenAI-shaped stub so the example
 runs with no network and no keys. In production you drop ``client=`` and configure the endpoint:
 
-    # Azure AI Foundry (cloud) — Chat Completions; `model` is your DEPLOYMENT name:
+    # Microsoft Foundry (cloud) — Chat Completions; `model` is your DEPLOYMENT name:
     agent = Agent(name="foundry", model="my-gpt4o-deployment", provider="azure",
                   base_url="https://my-resource.openai.azure.com",   # or AZURE_OPENAI_ENDPOINT
                   api_key="<resource-key>")                          # or AZURE_OPENAI_API_KEY

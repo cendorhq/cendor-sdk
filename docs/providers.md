@@ -1,9 +1,9 @@
 # Providers
 
 One canonical message shape, ten provider paths: OpenAI (Chat Completions + Responses),
-Anthropic, Google Gemini, AWS Bedrock, Ollama, Hugging Face, Azure AI Foundry (Chat + Responses),
-and Foundry Local. Switch providers by changing the model id — the conversation, tools, and
-governance don't change.
+Anthropic, Google Gemini, AWS Bedrock, Ollama, Hugging Face, Microsoft Foundry
+(formerly Azure AI Foundry; Chat + Responses), and Foundry Local. Switch providers by changing the
+model id — the conversation, tools, and governance don't change.
 
 ## The support matrix
 
@@ -16,8 +16,8 @@ governance don't change.
 | AWS Bedrock | `[bedrock]` | ✅ | ✅ toolConfig |
 | Ollama (local) | `[ollama]` | ✅ | ✅ functions |
 | Hugging Face | `[huggingface]` | ✅ (OpenAI-shape) | ✅ functions |
-| Azure AI Foundry (Chat) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
-| Azure AI Foundry (Responses) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
+| Microsoft Foundry (Chat) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
+| Microsoft Foundry (Responses) | `[azure]` | ✅ (OpenAI-shape) | ✅ functions |
 | Foundry Local (on-device) | `[foundry-local]` | ✅ (OpenAI-shape) | ✅ functions |
 
 **Auth for every path:** see [API keys & credentials](#api-keys--credentials) — the SDK reads
@@ -54,7 +54,7 @@ resolve in this order — the same in both languages:
 | AWS Bedrock | AWS credential chain (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, profile, or IAM role) — no API key | `AWS_REGION` |
 | Ollama | none — local | `OLLAMA_HOST` |
 | Hugging Face | `HF_TOKEN` (or `HUGGINGFACEHUB_API_TOKEN`) | — |
-| Azure AI Foundry | `AZURE_OPENAI_API_KEY` / `AZURE_INFERENCE_CREDENTIAL` / `AZURE_AI_API_KEY` | `AZURE_OPENAI_ENDPOINT` |
+| Microsoft Foundry | `AZURE_OPENAI_API_KEY` / `AZURE_INFERENCE_CREDENTIAL` / `AZURE_AI_API_KEY` | `AZURE_OPENAI_ENDPOINT` |
 | Foundry Local | none (`FOUNDRY_LOCAL_API_KEY` optional) | `FOUNDRY_LOCAL_ENDPOINT` |
 
 3. **Bring your own client:** `Agent(client=…)` — you construct the provider SDK client yourself
@@ -128,7 +128,7 @@ llama = Agent(name="l", model="llama3.2")
 # Hugging Face — HF_TOKEN, or api_key=; always provider="huggingface"
 hf = Agent(name="h", model="meta-llama/Llama-3.3-70B-Instruct", provider="huggingface")
 
-# Azure AI Foundry — resource key + endpoint; always provider="azure"
+# Microsoft Foundry — resource key + endpoint; always provider="azure"
 az = Agent(name="z", model="my-gpt4o-deployment", provider="azure",
            api_key="<resource-key>", base_url="https://my-res.openai.azure.com")
 ```
@@ -151,7 +151,7 @@ const llama = new Agent({ name: 'l', model: 'llama3.2' });
 // Hugging Face — HF_TOKEN, or apiKey; always provider: 'huggingface'
 const hf = new Agent({ name: 'h', model: 'meta-llama/Llama-3.3-70B-Instruct', provider: 'huggingface' });
 
-// Azure AI Foundry — resource key + endpoint; always provider: 'azure'
+// Microsoft Foundry — resource key + endpoint; always provider: 'azure'
 const az = new Agent({ name: 'z', model: 'my-gpt4o-deployment', provider: 'azure',
                        apiKey: '<resource-key>', baseURL: 'https://my-res.openai.azure.com' });
 ```
@@ -160,7 +160,7 @@ const az = new Agent({ name: 'z', model: 'my-gpt4o-deployment', provider: 'azure
 
 The same `api_key` / `provider` / `base_url` options work on [`llm_summarizer`](memory.md),
 [`embed`](rag.md), and the RAG retriever. Azure **keyless** (Entra ID) auth: see
-[Azure AI Foundry](#azure-ai-foundry). Testing **without** any key: see
+[Microsoft Foundry](#microsoft-foundry). Testing **without** any key: see
 [Eval & regression testing](eval.md) — cassette replay needs no credentials.
 
 ### Provider inference — and when to be explicit
@@ -296,7 +296,7 @@ does; a `tokens=` cap is unaffected, because token counting never needed a price
 ## Hugging Face
 
 > **TypeScript usage capture.** All three providers below ship in `@cendor/sdk` with end-to-end
-> cost and usage capture in TypeScript today — Azure AI Foundry and Foundry Local wrap the standard
+> cost and usage capture in TypeScript today — Microsoft Foundry and Foundry Local wrap the standard
 > `openai` client, and Hugging Face is one of the providers `@cendor/core` detects directly. See the
 > [parity matrix](/docs/languages).
 
@@ -349,13 +349,15 @@ const endpoint = new Agent({ name: 'hf', model: 'tgi', provider: 'huggingface',
 Route through a specific inference provider (e.g. `together`, `fireworks-ai`) with the
 `HF_PROVIDER` env var.
 
-## Azure AI Foundry
+## Microsoft Foundry
 
-Microsoft's current guidance — the `AzureOpenAI` client and `azure-ai-inference` are being
-retired — is to consume Foundry deployments with the **standard `openai` SDK** pointed at the
-Foundry `/openai/v1/` endpoint. So `provider="azure"` *is* the OpenAI provider with Foundry-aware
-construction. Install with `pip install "cendor-sdk[azure]"` (it just pulls `openai`); in TypeScript
-the Azure path reuses the `openai` peer you already have. Two rules:
+Microsoft's guidance is to consume Foundry deployments with the **standard `openai` SDK** (not the
+legacy `AzureOpenAI` client) pointed at the Foundry `/openai/v1/` endpoint — `azure-ai-inference`
+(the Azure AI Inference beta SDK, the `/models` route) is **deprecated and retires on
+26 August 2026** per Microsoft's Foundry Models endpoints page, and the GA `/openai/v1` API with a
+standard `openai` client is its replacement. So `provider="azure"` *is* the OpenAI provider with
+Foundry-aware construction. Install with `pip install "cendor-sdk[azure]"` (it just pulls `openai`);
+in TypeScript the Azure path reuses the `openai` peer you already have. Two rules:
 
 1. **`model` is your deployment name**, not the underlying model name (Azure keys on deployment).
 2. **`base_url` is the Foundry endpoint** — `/openai/v1/` is appended for you; also read from
@@ -508,7 +510,7 @@ overwrites `apiKey` with its Entra token provider, so on the JS side authenticat
 the credential you pass to the constructor.
 
 You can also use the Foundry SDK on the **libraries** door with no agent loop at all — see
-[Providers → Azure AI Foundry](/docs/providers#azure-ai-foundry-models-via-the-openai-sdk).
+[Providers → Microsoft Foundry](/docs/providers#microsoft-foundry-models-via-the-openai-sdk).
 
 For an OpenAI-family deployment (`gpt-*`, `o*`) you can drive the **Responses API** instead with
 `provider="azure_responses"` — same construction, Responses semantics. Keep `provider="azure"`

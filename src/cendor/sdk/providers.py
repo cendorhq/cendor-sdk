@@ -7,17 +7,18 @@ one **canonical (OpenAI-shape)** format so a run can hand off between providers 
 history; each provider translates canonical → its wire format at call time.
 
 Normalization is implemented for OpenAI (Chat Completions + Responses), Anthropic, Gemini, Bedrock,
-Ollama, Hugging Face, Azure AI Foundry (Chat Completions + Responses), and Foundry Local. Client
-construction ships for OpenAI + Anthropic; the others construct behind lazy imports via
-their extras.
+Ollama, Hugging Face, Microsoft Foundry (formerly Azure AI Foundry; Chat Completions + Responses),
+and Foundry Local. Client construction ships for OpenAI + Anthropic; the others construct behind
+lazy imports via their extras.
 
-Hugging Face (``huggingface_hub``) and Azure AI Foundry both speak the OpenAI Chat Completions
+Hugging Face (``huggingface_hub``) and Microsoft Foundry both speak the OpenAI Chat Completions
 *shape*, so their providers subclass :class:`OpenAIChatProvider` and only override client
-construction. For Foundry this is deliberate and future-proof: Microsoft's current guidance is to
-consume Foundry deployments with the **standard** ``openai`` SDK pointed at the ``/openai/v1/``
-endpoint — the ``AzureOpenAI`` client and the ``azure-ai-inference`` package are being retired — so
-"connect to Foundry" is just the OpenAI provider with a Foundry ``base_url`` and the *deployment
-name* as the model id.
+construction. For Foundry this is deliberate and future-proof: Microsoft's guidance is to consume
+Foundry deployments with the **standard** ``openai`` SDK pointed at the ``/openai/v1/`` endpoint,
+not the legacy ``AzureOpenAI`` client — ``azure-ai-inference`` (the Azure AI Inference beta SDK,
+the ``/models`` route) is deprecated and retires on 26 August 2026, per Microsoft's Foundry Models
+endpoints page — so "connect to Foundry" is just the OpenAI provider with a Foundry ``base_url``
+and the *deployment name* as the model id.
 
 **Credentials.** Client construction takes no Cendor-specific key. A key resolves: explicit
 ``Agent(api_key=…)`` → the provider's standard env var (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
@@ -1627,7 +1628,7 @@ _AZURE_PROJECT_PATH_RE = re.compile(r"/api/projects/[^/]+$")
 
 
 def _azure_foundry_base_url(config: dict) -> str | None:
-    """Resolve (and normalize) the Azure AI Foundry OpenAI-v1 ``base_url``.
+    """Resolve (and normalize) the Microsoft Foundry OpenAI-v1 ``base_url``.
 
     Accepts an explicit ``base_url`` or the ``AZURE_OPENAI_ENDPOINT`` / ``AZURE_OPENAI_BASE_URL`` /
     ``AZURE_AI_ENDPOINT`` env vars — a bare Foundry host (``https://<res>.openai.azure.com`` or
@@ -1662,11 +1663,13 @@ def _azure_foundry_base_url(config: dict) -> str | None:
 
 
 class AzureFoundryProvider(OpenAIChatProvider):
-    """Azure AI Foundry models via the OpenAI-compatible ``/openai/v1/`` endpoint.
+    """Microsoft Foundry models via the OpenAI-compatible ``/openai/v1/`` endpoint.
 
-    Microsoft's current guidance (the ``AzureOpenAI`` client and ``azure-ai-inference`` are being
-    retired) is to consume Foundry deployments with the **standard** ``openai`` SDK pointed at the
-    Foundry v1 endpoint. So this is :class:`OpenAIChatProvider` with Foundry-aware construction:
+    Microsoft's guidance is to consume Foundry deployments with the **standard** ``openai`` SDK
+    pointed at the Foundry v1 endpoint, not the legacy ``AzureOpenAI`` client —
+    ``azure-ai-inference`` (the Azure AI Inference beta SDK, the ``/models`` route) is deprecated
+    and retires on 26 August 2026, per Microsoft's Foundry Models endpoints page. So this is
+    :class:`OpenAIChatProvider` with Foundry-aware construction:
 
     * ``model`` is your Foundry **deployment name** (Azure keys on deployment, not model, name).
     * ``base_url`` is the Foundry endpoint — either ``https://<res>.openai.azure.com`` (Azure OpenAI
@@ -1705,7 +1708,7 @@ class AzureFoundryProvider(OpenAIChatProvider):
 
 
 class AzureFoundryResponsesProvider(OpenAIResponsesProvider):
-    """Azure AI Foundry via the OpenAI **Responses** API (``responses.create``).
+    """Microsoft Foundry via the OpenAI **Responses** API (``responses.create``).
 
     Same Foundry-aware client construction as :class:`AzureFoundryProvider`, but drives the
     Responses API instead of Chat Completions — the primary surface for OpenAI-family Foundry
@@ -1766,7 +1769,7 @@ class FoundryLocalProvider(OpenAIChatProvider):
             raise ValueError(
                 "Foundry Local needs an endpoint: pass base_url=... on the Agent or set "
                 "FOUNDRY_LOCAL_ENDPOINT (e.g. foundry_local.FoundryLocalManager(alias).endpoint). "
-                "See docs/sdk.md → Connecting to Hugging Face & Azure AI Foundry."
+                "See docs/sdk.md → Connecting to Hugging Face & Microsoft Foundry."
             )
         api_key = config.get("api_key") or os.environ.get("FOUNDRY_LOCAL_API_KEY") or "none"
         cls = openai.AsyncOpenAI if async_ else openai.OpenAI

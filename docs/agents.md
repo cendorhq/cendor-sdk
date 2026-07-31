@@ -89,9 +89,9 @@ new Agent({
 <!-- /tabs -->
 
 The provider is inferred from the model id (`gpt-*`/`o*` → OpenAI, `claude-*` → Anthropic,
-`gemini-*` → Google, …); pass `provider=` to override. Hugging Face and Azure AI Foundry ids
-aren't prefix-inferable, so those always take an explicit `provider=` — see
-[Providers](providers.md).
+`gemini-*` → Google, …); pass `provider=` to override. Hugging Face and Microsoft Foundry
+(formerly Azure AI Foundry) ids aren't prefix-inferable, so those always take an explicit
+`provider=` — see [Providers](providers.md).
 
 `api_key` / `base_url` / `client` are also accepted: keys resolve **explicit `api_key=` → the
 provider's standard env var (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`, the AWS
@@ -315,7 +315,7 @@ const result = await run(agent, 'Weather in Paris?');
 streamed **reasoning/thinking**, kept separate from the answer), `ToolCallEvent` (a tool is about to
 run), `ToolResultEvent` (a tool returned its result), and the terminal `RunComplete` (which carries
 the same `Result` a blocking `run()` returns). Token-by-token reassembly is native on the OpenAI
-**Chat** family (Hugging Face, Azure AI Foundry, and Foundry Local ride the same client), on
+**Chat** family (Hugging Face, Microsoft Foundry, and Foundry Local ride the same client), on
 **Anthropic**, and on Ollama — tool-call deltas included. OpenAI **Responses**, Gemini, and Bedrock
 make a non-streamed call and yield the answer as one delta: same events, coarser granularity.
 Multi-agent handoff runs stream too ([Multi-agent](multi-agent.md)).
@@ -491,7 +491,7 @@ Python's equivalents differ — e.g. Python has no in-memory session *store*, ju
   it is absent from `tool_steps` and from the span tree; and a tool whose *own* output starts with
   `"[error] "` is indistinguishable from one that failed.
 - **Token-level streaming is the OpenAI Chat family, Anthropic, and Ollama** (plus Hugging Face,
-  Azure AI Foundry, and Foundry Local, which ride the OpenAI Chat client). OpenAI Responses, Gemini,
+  Microsoft Foundry, and Foundry Local, which ride the OpenAI Chat client). OpenAI Responses, Gemini,
   and Bedrock fall back to a non-streamed call and yield one whole-response delta — same events,
   coarser granularity.
 - **`ThinkingDelta` needs a provider that streams reasoning** (Ollama `think` models,

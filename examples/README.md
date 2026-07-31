@@ -10,7 +10,7 @@ cassette) so it runs offline with no API keys — the same discipline as the tes
 | [supervisor.py](supervisor.py) | A coordinator routes to 2 sub-agents; per-agent budgets; one verifiable audit trail. |
 | [mcp_agent.py](mcp_agent.py) | Consume an MCP tool, emit an OTel span tree, and serve the agent over A2A. |
 | [eval_suite.py](eval_suite.py) | Record a trajectory, then replay it as a regression test gating output + cost. |
-| [foundry_agent.py](foundry_agent.py) | Governed agent on Azure AI Foundry (cloud) + Foundry Local (on-device), offline. |
+| [foundry_agent.py](foundry_agent.py) | Governed agent on Microsoft Foundry (cloud, formerly Azure AI Foundry) + Foundry Local (on-device), offline. |
 | [huggingface_agent.py](huggingface_agent.py) | Governed agent on Hugging Face Inference — `chat_completion` attributed to `huggingface`. |
 
 Run one with:

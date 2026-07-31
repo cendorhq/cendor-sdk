@@ -70,11 +70,11 @@ result = run(Agent(name="a", model="gpt-4o", instructions="Be brief."), "Hi")
 result = await run.aio(agent, "Hi")   # same call, async
 ```
 
-> `run.aio` is natively async for OpenAI (Chat + Responses — and the Azure AI Foundry / Foundry Local
-> paths that use the same client), Anthropic, Google Gemini (google-genai's
-> `aio.models.generate_content`), Ollama, and Hugging Face. Bedrock's boto3 `converse` is blocking, so
-> `run.aio` offloads it to a worker thread (`asyncio.to_thread`) — the event loop keeps running, and
-> the run's governance scope still attaches.
+> `run.aio` is natively async for OpenAI (Chat + Responses — and the Microsoft Foundry (formerly
+> Azure AI Foundry) / Foundry Local paths that use the same client), Anthropic, Google Gemini
+> (google-genai's `aio.models.generate_content`), Ollama, and Hugging Face. Bedrock's boto3
+> `converse` is blocking, so `run.aio` offloads it to a worker thread (`asyncio.to_thread`) — the
+> event loop keeps running, and the run's governance scope still attaches.
 
 ## Why it's different
 
@@ -121,14 +121,14 @@ canonical shape, so a run can **hand off between providers** without rewriting i
 | **AWS Bedrock** | Converse API | `[bedrock]` |
 | **Ollama** | local models | `[ollama]` |
 | **Hugging Face** | Inference / endpoints | `[huggingface]` |
-| **Azure AI Foundry** | deployments via the OpenAI v1 endpoint (Chat + Responses) | `[azure]` |
+| **Microsoft Foundry** | deployments via the OpenAI v1 endpoint (Chat + Responses) | `[azure]` |
 | **Foundry Local** | on-device, OpenAI-compatible | `[foundry-local]` |
 
 ## More in the box
 
 Everything a real agent needs — all governed through the same seams:
 
-- **Streaming** — `run.stream` / `run.astream` yield text deltas + tool events. Incremental token-level deltas on the OpenAI Chat family (including Azure AI Foundry, Foundry Local, and Hugging Face), Anthropic, and Ollama; OpenAI *Responses*, Gemini, and Bedrock yield the whole response as one delta.
+- **Streaming** — `run.stream` / `run.astream` yield text deltas + tool events. Incremental token-level deltas on the OpenAI Chat family (including Microsoft Foundry, Foundry Local, and Hugging Face), Anthropic, and Ollama; OpenAI *Responses*, Gemini, and Bedrock yield the whole response as one delta.
 - **Structured output** — a dataclass / Pydantic / JSON-schema `output_type` uses each provider's native schema mode.
 - **Reasoning & control** — `Agent.extra` passes `tool_choice`, `reasoning_effort`, `top_p`, `stop`, …; o-series `temperature` is handled for you.
 - **RAG** — `VectorIndex` + `Agent(retriever=…)` inject governed retrieval, or expose your store as a `@tool`.

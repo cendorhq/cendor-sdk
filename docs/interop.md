@@ -139,7 +139,7 @@ your agent sees governed metadata, not just text.
 ## Microsoft 365 / Foundry — publish as a custom-engine agent
 
 `FoundryAdapter` speaks the Bot Framework **Activity** protocol — the surface a custom-engine
-agent exposes to Copilot / Teams / Azure AI Foundry:
+agent exposes to Copilot / Teams / Microsoft Foundry (formerly Azure AI Foundry):
 
 <!-- tabs: lang -->
 <!-- tab: Python -->

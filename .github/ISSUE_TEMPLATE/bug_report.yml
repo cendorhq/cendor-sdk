@@ -62,8 +62,8 @@ body:
         - AWS Bedrock (boto3 converse)
         - Ollama (local)
         - Hugging Face (InferenceClient)
-        - Azure AI Foundry (Chat)
-        - Azure AI Foundry (Responses)
+        - Microsoft Foundry (Chat)
+        - Microsoft Foundry (Responses)
         - Foundry Local (on-device)
         - Microsoft 365 Agents SDK host (pro-code custom engine agent)
     validations:

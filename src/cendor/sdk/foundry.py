@@ -1,10 +1,11 @@
 """Publish a governed agent as a custom-engine agent for Microsoft 365 / Foundry.
 
 A dependency-free adapter over the Bot Framework **Activity** protocol — the messaging surface a
-custom-engine agent exposes to Copilot / Teams / Azure AI Foundry. ``FoundryAdapter.on_activity``
-takes an inbound ``message`` Activity, runs the governed agent, and returns an outbound Activity
-(carrying governance metadata: trace id + cost). You wire this into your web endpoint of choice;
-the governance (budgets/audit/redaction) rides the same seams as any other run.
+custom-engine agent exposes to Copilot / Teams / Microsoft Foundry (formerly Azure AI Foundry).
+``FoundryAdapter.on_activity`` takes an inbound ``message`` Activity, runs the governed agent, and
+returns an outbound Activity (carrying governance metadata: trace id + cost). You wire this into
+your web endpoint of choice; the governance (budgets/audit/redaction) rides the same seams as any
+other run.
 """
 
 from __future__ import annotations
