@@ -51,6 +51,44 @@ def _atomic_replace(tmp: Path, target: Path) -> None:
             time.sleep(_REPLACE_BASE_S * 2**attempt)
 
 
+def _final_answer(messages: list[Any]) -> str | None:
+    """The final assistant answer a transcript already ends with, or ``None``.
+
+    A transcript whose last message is an assistant turn with non-empty ``content`` and no
+    ``tool_calls`` is complete in substance: every runner loop breaks on exactly that message, and
+    a tool or handoff turn always appends ``role: "tool"`` results after it — so an *unfinished*
+    checkpoint can only carry this shape when the crash landed in the window between the last
+    per-turn save and the ``done`` save. Conservative on purpose: empty/absent content falls
+    through to the normal resume (re-entering the loop), never the other way around.
+    """
+    last = messages[-1] if messages else None
+    if (
+        isinstance(last, dict)
+        and last.get("role") == "assistant"
+        and not last.get("tool_calls")
+        and last.get("content")
+    ):
+        return str(last["content"])
+    return None
+
+
+def _settle(state: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Normalise an unfinished state that is finished in substance to a finished one.
+
+    Returns the state unchanged when it is already ``done`` (or ``None``); returns a settled copy
+    (``done: True``, ``output`` recovered from the stored output or the final answer) when the
+    transcript already ends with a final assistant answer; otherwise returns the state unchanged.
+    A stored ``output`` (the streaming paths persist it with ``done: False``, possibly
+    guardrail-transformed) wins over the raw last-message content.
+    """
+    if state and not state.get("done"):
+        answer = _final_answer(state.get("messages") or [])
+        if answer is not None:
+            stored = state.get("output")
+            return {**state, "done": True, "output": stored if stored is not None else answer}
+    return state
+
+
 class Checkpointer:
     """Persist and restore run state to a local JSON file.
 
@@ -113,12 +151,20 @@ class Checkpointer:
         return None
 
     def finished(self) -> dict[str, Any] | None:
-        """The full saved state iff it is a finished (``done``) run, else ``None``.
+        """The full saved state iff the run is finished, else ``None``.
+
+        Finished means ``done`` — or **finished in substance**: an unfinished state whose
+        transcript already ends with a final assistant answer, which only the crash window between
+        the last per-turn save and the ``done`` save can produce (see :func:`_settle`). Settling it
+        here is what stops a resume from re-invoking the model on a complete conversation — where
+        re-doing the task, tools included, is a legitimate sample for the model to take (measured
+        live by the external suite: a resumed transcript ending in its own answer re-ran a
+        completed, non-idempotent-in-general tool).
 
         Callers early-return a completed ``Result`` from this stored ``{output, messages}`` — so
-        resuming an already-finished run re-invokes neither the model nor any tool.
+        resuming a finished run re-invokes neither the model nor any tool.
         """
-        state = self.load()
+        state = _settle(self.load())
         if state and state.get("done"):
             _tel.emit_checkpoint(  # E-wave: checkpoint.resume span (finished — no model call)
                 "resume",

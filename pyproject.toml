@@ -1,6 +1,6 @@
 [project]
 name = "cendor-sdk"
-version = "1.22.1"
+version = "1.22.2"
 description = "Build an LLM agent with spending limits, a tamper-evident audit trail, PII redaction, and record/replay testing built in from the start — a governed agent in about 10 lines."
 readme = "README-pypi.md"
 requires-python = ">=3.11"

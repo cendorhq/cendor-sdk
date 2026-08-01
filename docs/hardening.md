@@ -124,6 +124,20 @@ run that ended without a final answer reports it via
 progresses, and a finished stream done-resumes to a lone terminal `RunComplete` — no earlier deltas
 are re-emitted.
 
+Two resume behaviours worth knowing exactly (since `cendor-sdk` 1.22.2 / `@cendor/sdk` 3.2.2):
+
+- **An unfinished checkpoint whose transcript already ends with the final assistant answer is
+  treated as finished.** Every path saves the answering turn *before* the `done` flag lands, so a
+  crash in that window leaves this shape behind — and re-asking the model to continue a complete
+  conversation invites it to re-do the task, completed tool calls included. The resume returns the
+  stored answer with zero model and zero tool invocations, exactly like a `done` resume.
+- **A genuinely mid-run resume replays the saved messages — completed tool results included — and
+  lets the model continue.** The SDK never re-executes a tool whose result is in the transcript,
+  but whether the *model* chooses to issue the same tool call again is the model's own sampling
+  decision, and no framework can promise it won't. **Make tools you use under `checkpoint=`
+  idempotent** (or safe to repeat) — a resumed run is, by definition, one that was interrupted
+  mid-side-effects.
+
 `checkpoint=` accepts a path (auto-wrapped) or a `Checkpointer` instance — pass the class directly
 when you want the handle (to inspect `resumable_messages()` or `clear()` it):
 

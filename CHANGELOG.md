@@ -4,6 +4,28 @@ All notable changes to `cendor-sdk` are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.2] — 2026-08-01
+
+### Fixed
+- **Resuming an unfinished checkpoint whose transcript already ends with the final assistant answer
+  no longer re-invokes the model.** Every runner path saves the answering turn with `done: false`
+  *before* the `done: true` save lands, so a crash in that window leaves an "unfinished" checkpoint
+  that is finished in substance — and re-asking a model to continue its own complete conversation
+  invites it to re-do the task, completed tool calls included. Measured live by the external suite
+  (release run `2026-08-01_032347`): a resumed transcript ending in its own answer re-ran a
+  completed tool — the exact failure `checkpoint=` exists to prevent, since a resumed run is by
+  definition one interrupted mid-side-effects. `Checkpointer.finished()` now settles that shape
+  (`done: true`, output recovered from the stored output — the streaming paths persist it — or the
+  final answer), so all six resume paths (sync/async run, both streams, both team runners) return
+  the stored answer with **zero** model and **zero** tool invocations, done-resume parity included
+  (same `trace_id`, empty `steps`). Conservative predicate: only a trailing assistant message with
+  non-empty content and no `tool_calls` settles — a transcript ending at a tool result still
+  resumes through the loop, and an empty-content tail keeps today's behaviour.
+- **Documented honestly** (docs/hardening.md): on a genuinely mid-run resume the SDK replays the
+  saved messages — tool results included — and never re-executes a completed tool itself, but
+  whether the *model* re-issues the same call is its own sampling decision. Make tools used under
+  `checkpoint=` idempotent.
+
 ## [1.22.1] — 2026-07-31
 
 ### Fixed

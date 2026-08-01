@@ -217,6 +217,131 @@ async def test_finished_checkpoint_resume_does_not_rerun_async(tmp_path):
     assert result.steps == []
 
 
+# ------------------------------------------ resuming a SETTLED (unfinished-but-complete) checkpoint
+#
+# The crash window: every runner path saves the answering turn with done=False BEFORE the done=True
+# save lands, so a crash there leaves an "unfinished" checkpoint whose transcript already ends with
+# the final assistant answer. Resuming that used to re-enter the model loop on a semantically
+# complete conversation — and what a model does with its own finished transcript is undefined;
+# re-doing the task, tools included, is a legitimate sample (measured live by the external suite:
+# BUG-sdk-resume-recalls-a-tool-already-in-the-replayed-messages). finished() now settles the shape.
+
+
+def _settled_ckpt(tmp_path, answer, *, tail=None, output=None):
+    """An UNFINISHED checkpoint whose transcript ends with `tail` (default: a final answer)."""
+    messages = [
+        {"role": "user", "content": "weather in Paris?"},
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_1",
+                    "type": "function",
+                    "function": {"name": "get_weather", "arguments": '{"city": "Paris"}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_1",
+            "name": "get_weather",
+            "content": "Sunny in Paris",
+        },
+    ]
+    messages.extend(tail if tail is not None else [{"role": "assistant", "content": answer}])
+    path = tmp_path / "settled.ckpt.json"
+    path.write_text(
+        json.dumps({"run_id": "r-settled", "messages": messages, "done": False, "output": output})
+    )
+    return str(path)
+
+
+def test_settled_checkpoint_resume_does_not_reenter_the_loop(tmp_path):
+    """An unfinished checkpoint ending in a final assistant answer is finished in substance: the
+    resume must return that answer with ZERO model calls and ZERO tool runs (done-resume parity)."""
+    path = _settled_ckpt(tmp_path, "It's sunny in Paris.")
+    _tool_runs["n"] = 0
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("SHOULD NOT BE CALLED")
+
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], client=_stub(create))
+    result = run(agent, "weather in Paris?", checkpoint=path)
+
+    assert result.output == "It's sunny in Paris."
+    assert model_calls["n"] == 0  # the loop was never re-entered
+    assert _tool_runs["n"] == 0  # the completed tool was not re-run
+    assert result.steps == []  # no bus events on a resume
+    assert result.trace_id == "r-settled"  # done-resume parity: the stored run id, no fresh mint
+    assert result.incomplete is False
+
+
+async def test_settled_checkpoint_resume_does_not_reenter_the_loop_async(tmp_path):
+    """Same settle on the async single-agent path."""
+    path = _settled_ckpt(tmp_path, "It's sunny in Paris.")
+    _tool_runs["n"] = 0
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("SHOULD NOT BE CALLED")
+
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], client=_stub(create))
+    result = await run.aio(agent, "weather in Paris?", checkpoint=path)
+
+    assert result.output == "It's sunny in Paris."
+    assert model_calls["n"] == 0
+    assert _tool_runs["n"] == 0
+    assert result.trace_id == "r-settled"
+
+
+def test_settled_checkpoint_keeps_stored_output_over_last_message(tmp_path):
+    """A stream-path save carries `output` (possibly guardrail-transformed) with done=False: the
+    settle must prefer the stored output over the raw last-message content."""
+    path = _settled_ckpt(tmp_path, "raw answer", output="gated answer")
+    agent = Agent(name="assistant", model="gpt-4o", client=_stub(lambda **kw: _text_response("no")))
+    result = run(agent, "weather in Paris?", checkpoint=path)
+    assert result.output == "gated answer"
+
+
+def test_mid_run_checkpoint_still_resumes_through_the_loop(tmp_path):
+    """Negative shape: a transcript ending at a TOOL RESULT is genuinely mid-run — the loop must
+    re-enter (one model call) and continue from the saved result without the SDK re-running it."""
+    path = _settled_ckpt(tmp_path, "", tail=[])  # ends at the tool-result message
+    _tool_runs["n"] = 0
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("It's sunny in Paris.")
+
+    agent = Agent(name="assistant", model="gpt-4o", tools=[get_weather], client=_stub(create))
+    result = run(agent, "weather in Paris?", checkpoint=path)
+
+    assert result.output == "It's sunny in Paris."
+    assert model_calls["n"] == 1  # the loop ran — this shape is NOT settled
+    assert _tool_runs["n"] == 0  # the saved tool result was replayed, not re-executed by the SDK
+
+
+def test_empty_answer_tail_is_not_settled(tmp_path):
+    """Conservative predicate: an assistant tail with empty content falls through to the loop
+    (status quo) rather than being declared a final answer."""
+    path = _settled_ckpt(tmp_path, "", tail=[{"role": "assistant", "content": ""}])
+    model_calls = {"n": 0}
+
+    def create(**kwargs):
+        model_calls["n"] += 1
+        return _text_response("recovered answer")
+
+    agent = Agent(name="assistant", model="gpt-4o", client=_stub(create))
+    result = run(agent, "weather in Paris?", checkpoint=path)
+    assert result.output == "recovered answer"
+    assert model_calls["n"] == 1
+
+
 # --------------------------------------------------------------------------- durable memory
 
 

@@ -82,6 +82,22 @@ async def test_astream_done_resume_replays_without_calling_the_model(tmp_path):
     assert events[0].result.output == "first"
 
 
+async def test_astream_settled_resume_replays_without_calling_the_model(tmp_path):
+    """A stream save lands the answering turn with done=False before the done save (the crash
+    window) — that settled shape must short-circuit exactly like a done-resume: a lone RunComplete,
+    no model call, no re-yielded deltas."""
+    ckpt = tmp_path / "run.json"
+    agent = Agent(name="a", model="gpt-4o", client=_astream_client([_stream_answer("first")]))
+    await _collect(run.astream(agent, "hi", checkpoint=str(ckpt)))  # complete + persist
+    state = json.loads(ckpt.read_text())
+    state["done"] = False  # simulate the crash between the per-turn save and the done save
+    ckpt.write_text(json.dumps(state))
+    agent2 = Agent(name="a", model="gpt-4o", client=_raising_async_client())
+    events = await _collect(run.astream(agent2, "hi", checkpoint=str(ckpt)))
+    assert len(events) == 1 and isinstance(events[0], RunComplete)
+    assert events[0].result.output == "first"
+
+
 # --------------------------------------------------------------------------- team (G1, multi-agent)
 
 
