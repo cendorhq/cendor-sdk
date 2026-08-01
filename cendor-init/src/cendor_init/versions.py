@@ -11,14 +11,14 @@ matching numbers, is the contract.
 
 from __future__ import annotations
 
-AS_OF = "2026-08-01"
+AS_OF = "2026-08-02"
 
 #: The live machine-readable feed ``doctor --online`` fetches.
 RELEASES_URL = "https://cendor.ai/releases.json"
 
 PYPI: dict[str, str] = {
-    "cendor-core": "1.18.0",
-    "cendor-tokenguard": "1.7.0",
+    "cendor-core": "1.19.0",
+    "cendor-tokenguard": "1.8.0",
     "cendor-guardrails": "1.7.0",
     "cendor-contextkit": "1.1.0",
     "cendor-squeeze": "1.1.2",
