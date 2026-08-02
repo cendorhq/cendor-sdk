@@ -17,7 +17,7 @@ AS_OF = "2026-08-02"
 RELEASES_URL = "https://cendor.ai/releases.json"
 
 PYPI: dict[str, str] = {
-    "cendor-core": "1.19.1",
+    "cendor-core": "1.19.2",
     "cendor-tokenguard": "1.8.0",
     "cendor-guardrails": "1.7.0",
     "cendor-contextkit": "1.1.0",
